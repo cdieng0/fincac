@@ -92,7 +92,7 @@ Large artifacts — the 87 MB corpus and the model weights — live on Hugging F
 ## Quick start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/finsent.git
+git clone https://github.com/cdieng0/fincac.git
 cd finsent
 pip install -r requirements.txt
 ```
@@ -109,8 +109,8 @@ The dataset is easier to obtain from the Hub than to re-extract:
 
 ```python
 from datasets import load_dataset
-corpus = load_dataset("YOUR_USERNAME/FinCAC40", "corpus", split="train")
-gold   = load_dataset("YOUR_USERNAME/FinCAC40", "gold",   split="test")
+corpus = load_dataset("CID99/FinCAC40", "corpus", split="train")
+gold   = load_dataset("CID99/FinCAC40", "gold",   split="test")
 ```
 
 ---
