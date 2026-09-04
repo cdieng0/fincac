@@ -1,0 +1,69 @@
+# FinSent — Fine-tuning & Semantic Extraction for CSRD Tasks
+# Requirements: Core + Optional sections
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 1: CORE DEPENDENCIES (CPU-compatible)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+pandas>=2.0              # Data manipulation (sample rigorous, gold export, IAA metrics)
+numpy>=1.24.0            # Numerical arrays (sampling, stratification, kappa bootstrap)
+scipy>=1.11.0            # Statistics (linregress, spearmanr)
+requests>=2.31.0         # HTTP (AMF API, Mistral Large API, publish to HF)
+openpyxl>=3.1.0          # Excel (GOLD export, annotation UI)
+pyarrow>=14.0.0          # Parquet (data format throughout pipeline)
+
+# CSV & text processing
+beautifulsoup4>=4.12.0   # AMF PDF parsing
+pdfplumber>=0.10.0       # PDF text extraction (AMF documents)
+
+# Machine learning (sklearn can run on CPU)
+scikit-learn>=1.3.0      # Metrics (Kappa, F1, accuracy, confusion matrix)
+
+# Logging & progress
+python-dateutil>=2.8.0   # Date parsing (run timestamps, AMF metadata)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 2: GPU OPTIONAL (for Phase 6: ORPO training & evaluation)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Install these ONLY if you have a GPU and plan to run Phase 6 (train_orpo_mistral7b.py)
+# On CPU-only environments, Phase 1-5 run without these dependencies.
+
+torch>=2.1               # Deep learning framework (required for ORPO training only)
+transformers>=4.44.0     # LLM utilities (Mistral-7B loading, inference)
+trl>=0.9,<0.13           # Trainer library (ORPO, DPO, SFT algorithms)
+peft>=0.12.0             # Parameter-efficient fine-tuning (LoRA)
+bitsandbytes>=0.43.0     # 4-bit quantization (QLoRA) (NVIDIA GPUs only)
+accelerate>=0.33.0       # Multi-GPU, mixed precision
+datasets>=2.14.0         # Dataset utilities for training
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 3: INTEGRATION CLIENTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+huggingface_hub>=0.20.0  # Publishing to Hugging Face Hub
+gradio>=4.44.0           # Spaces UI (app.py)
+
+# Optional LLM APIs (for Phase 4: benchmarking)
+openai>=1.0              # OpenAI API (GPT-4 evaluation)
+anthropic>=0.25.0        # Anthropic API (Claude evaluation)
+mistralai>=1.0           # Mistral API (inline, Mistral Large for silver labels)
+
+# Testing
+pytest>=7.4.0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INSTALLATION GUIDE
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# For Phase 1-5 (CPU-safe, no training):
+#   pip install pandas numpy scipy requests openpyxl pyarrow \
+#               beautifulsoup4 pdfplumber scikit-learn python-dateutil \
+#               huggingface_hub gradio mistralai
+#
+# For Phase 6 (ORPO training on GPU):
+#   1. Set up PyTorch on your GPU environment (Colab / RunPod / local)
+#   2. pip install -r requirements.txt
+#
+# For full evaluation (Phases 1-5 + benchmarking):
+#   pip install -r requirements.txt
+#   pip install openai anthropic  (LLM evaluation APIs)
