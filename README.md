@@ -8,9 +8,9 @@ This repository contains the complete pipeline: corpus extraction from AMF filin
 unbiased stratified sampling, expert annotation under the ESRS taxonomy, multi-LLM
 evaluation, linear probing, and a documented failure of preference optimization.
 
-[![Dataset](https://img.shields.io/badge/🤗%20Dataset-FinCAC40-yellow)](https://huggingface.co/datasets/YOUR_USERNAME/FinCAC40)
-[![Model](https://img.shields.io/badge/🤗%20Model-Mistral--7B--ORPO--CSRD-yellow)](https://huggingface.co/YOUR_USERNAME/Mistral-7B-ORPO-CSRD)
-[![Demo](https://img.shields.io/badge/🤗%20Space-collapse%20demo-blue)](https://huggingface.co/spaces/YOUR_USERNAME/FinCAC40-collapse-demo)
+[![Dataset](https://img.shields.io/badge/🤗%20Dataset-FinCAC40-yellow)](https://huggingface.co/datasets/CID99/FinCAC40)
+[![Model](https://img.shields.io/badge/🤗%20Model-Mistral--7B--ORPO--CSRD-yellow)](https://huggingface.co/CID99/Mistral-7B-ORPO-CSRD)
+[![Demo](https://img.shields.io/badge/🤗%20Space-collapse%20demo-blue)](https://huggingface.co/spaces/CID99/FinCAC40-collapse-demo)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 
 ---
