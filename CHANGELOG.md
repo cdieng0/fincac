@@ -1,37 +1,47 @@
-# Changelog — FINCAC40
+# Changelog
 
-Format basé sur [Keep a Changelog](https://keepachangelog.com/).
+Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — Audit reproductibilité (2026-09-04)
+## [1.1.0] — 2026-09-30 — Code and reproducibility release
 
 ### Added
-- Documentation reproductibilité complète (`docs/`, `README.md`)
-- `INCIDENT_NOTE.md` — incident dérive de prompt ORPO
-- `docs/large_files_report.md` — politique gros fichiers
-- `docs/reproduction_matrix.md` — traçabilité papier → script
-- `.env.example` — template variables d'environnement
-- `tests/` — tests counts corpus, Gold, prompts
-- `CITATION.cff`
+- The full pipeline code under `src/`, runnable from the repository root as
+  `python src/<module>/<script>.py`: stratified sampling, linear probing, κ recomputation,
+  ORPO diagnostics, and `fetch_gold_from_hf.py` to download the Gold Standard in the format the
+  scripts read.
+- Run artefacts in `data/results/`: probing results and Figure 2, ORPO run 1 configuration,
+  training log and report, ORPO run 2 report and per-example predictions.
+- `prompts/`: the exact zero-shot and 3-shot system prompts.
+- `evaluate_orpo.py --from-predictions`: rebuild an evaluation report on CPU; FNR and FPR are
+  reported under both conventions for malformed answers.
+- Tests: archived results reproduced and checked against the paper, prompt files, annotation
+  protocol, internal links.
+- Documentation: pipeline, reproducibility, data and Gold selection, annotation protocol,
+  prompts, Hugging Face, known discrepancies with the preprint (v1).
+- `LICENSE` (Apache 2.0), `CITATION.cff`, `.env.example`, `requirements-gpu.txt`.
 
 ### Changed
-- `.gitignore` — exclusion scientifique (secrets, venv, gros CSV)
-- `benchmark_temporal_drift.py` — clés API via variables d'environnement
-- `build_orpo_pairs.py` — clé API via variable d'environnement
+- Repository layout: cards in `cards/`, notes in `docs/`, preprint in `paper/`.
+- The sampler accepts the Hub corpus as well as the raw extraction.
+- `build_orpo_pairs.py --help` and `--dry-run` work without an API key; `evaluate_orpo.py`
+  runs without the baseline predictions file.
+- README and cards: preprint link, Hugging Face links, corrected figures (see
+  `docs/known_discrepancies.md`).
+
+### Fixed
+- `evaluate_orpo.py` reported a malformed-output rate of 0.0 when it was 30.7%.
+- Broken imports and data paths after the move to `src/`.
+
+### Removed
+- The committed virtual environment (`.venv/`), empty template READMEs, a backup copy of the
+  training script, and the abandoned press-scraping prototype.
 
 ### Security
-- **CRITIQUE :** suppression de clés API hardcodées dans le code source
-- **Action requise :** rotation des clés exposées avant push public
+- No API key in the code; keys are read from environment variables. Any key that appeared in
+  earlier local versions must be treated as compromised and revoked.
 
-### Known gaps documented
-- Script linear probing absent du dépôt
-- Checkpoints ORPO Run 1 non conservés localement
-- `requirements.txt` incomplet pour pipeline complet (en cours)
+## [1.0.0] — 2026-08 — Paper release
 
-## [1.0.0] — Release papier (2026-08)
-
-### Added
-- Corpus 313 898 paragraphes (`main_amf.py`)
-- Gold Standard 140 paragraphes
-- Benchmark 4 modèles zero-shot / 3-shot
-- ORPO Run 1 (collapse) et Run 2 (échec partiel)
-- Publication Hugging Face dataset + modèle ORPO
+- Corpus of 313,898 paragraphs (313,608 published), Gold Standard of 140 paragraphs.
+- Four-model benchmark in zero-shot and 3-shot; linear probing of Mistral-7B.
+- ORPO run 1 (collapse) and run 2 (failure); dataset, adapter and demo on Hugging Face.

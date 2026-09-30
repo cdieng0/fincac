@@ -1,0 +1,109 @@
+{
+  "orpo_metrics": {
+    "n_examples": 140,
+    "accuracy": 0.35714285714285715,
+    "f1_macro": 0.3591360028860029,
+    "parse_failure_rate": 0.0,
+    "kappa_binary": 0.2378,
+    "kappa_binary_ci95_low": 0.0787,
+    "kappa_binary_ci95_high": 0.3866,
+    "kappa_convention": "parse_errors_counted_as_none (binary CSRD vs none, bootstrap B=2000, seed=42)"
+  },
+  "orpo_fnr_by_epoch": {
+    "2010-2014": {
+      "n_relevant": 3,
+      "n_false_negative": 0,
+      "fnr": 0.0
+    },
+    "2015-2019": {
+      "n_relevant": 5,
+      "n_false_negative": 0,
+      "fnr": 0.0
+    },
+    "2020-2022": {
+      "n_relevant": 12,
+      "n_false_negative": 0,
+      "fnr": 0.0
+    },
+    "2023-2026": {
+      "n_relevant": 23,
+      "n_false_negative": 1,
+      "fnr": 0.043478260869565216
+    }
+  },
+  "orpo_fpr_by_epoch": {
+    "2010-2014": {
+      "n_none_gold": 30,
+      "n_false_positive": 21,
+      "fpr": 0.7
+    },
+    "2015-2019": {
+      "n_none_gold": 26,
+      "n_false_positive": 17,
+      "fpr": 0.6538461538461539
+    },
+    "2020-2022": {
+      "n_none_gold": 21,
+      "n_false_positive": 14,
+      "fpr": 0.6666666666666666
+    },
+    "2023-2026": {
+      "n_none_gold": 20,
+      "n_false_positive": 11,
+      "fpr": 0.55
+    }
+  },
+  "orpo_confusion": {
+    "confusion_matrix_binary": {
+      "labels": [
+        "none",
+        "CSRD"
+      ],
+      "matrix": [
+        [
+          62,
+          35
+        ],
+        [
+          16,
+          27
+        ]
+      ],
+      "note": "lignes=gold, colonnes=prédit, ordre [none, CSRD]"
+    },
+    "predicted_category_distribution": {
+      "PARSE_ERROR": 43,
+      "none": 35,
+      "E1": 30,
+      "ESRS2": 19,
+      "S1": 6,
+      "E5": 5,
+      "E2": 1,
+      "S4": 1
+    }
+  },
+  "baseline_fnr_by_epoch": {
+    "2010-2014": {
+      "n_relevant": 3,
+      "n_false_negative": 2,
+      "fnr": 0.6666666666666666
+    },
+    "2015-2019": {
+      "n_relevant": 4,
+      "n_false_negative": 4,
+      "fnr": 1.0
+    },
+    "2020-2022": {
+      "n_relevant": 12,
+      "n_false_negative": 9,
+      "fnr": 0.75
+    },
+    "2023-2026": {
+      "n_relevant": 22,
+      "n_false_negative": 19,
+      "fnr": 0.8636363636363636
+    }
+  },
+  "baseline_model_key": "mistral-7b",
+  "raw_predictions_csv": "data/orpo/raw_predictions_orpo_eval_report_orpo.csv"
+}

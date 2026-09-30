@@ -26,7 +26,8 @@ CONTENU (extrait verbatim de benchmark_temporal_drift.py — la source de vérit
 originale, celle qui a produit les résultats de Section 4) :
     TAXONOMY_BLOCK      — description des 12 catégories ESRS
     TASK_BLOCK          — instructions de tâche + format de sortie JSON
-    FEW_SHOT_EXAMPLES   — les 3 exemples de référence (none/E1/E2/E5/S1 selon n_shot)
+    FEW_SHOT_EXAMPLES   — 7 exemples ; build_system_prompt(3) utilise les 3 premiers
+                          (Gold #101 none, #23 E1, #57 E2)
     build_system_prompt(n_shot) — assemble le system prompt complet, 0-shot ou n-shot
 """
 

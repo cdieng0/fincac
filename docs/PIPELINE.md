@@ -1,370 +1,171 @@
-# FinSent Pipeline Documentation
+# Pipeline
 
-## Architecture Générale
+Every stage, the script that runs it, and the exact command. Run all commands from the
+repository root. Scripts write to `data/` unless stated otherwise.
 
-Le pipeline FinSent comprend 6 phases d'un système end-to-end pour l'extraction sémantique et l'affinement de modèles sur la taxonomie CSRD/ESRS.
+| # | Stage | Script | Needs | Used for the paper |
+|---|---|---|---|---|
+| 1 | Corpus extraction | `src/extraction/process_amf_extraction.py` | CPU, network, hours | yes |
+| 2 | Stratified pool | `src/sampling/build_annotation_sample_rigorous.py` | CPU, minutes | yes |
+| 3 | Annotation workbook | `src/annotation/export_gold_for_annotation.py` | CPU | planned hold-out, see [data.md](data.md#gold-standard) |
+| 4 | Four-LLM benchmark | `src/evaluation/benchmark_temporal_drift.py` | API keys | yes (Section 4.1) |
+| 5 | Metrics | `src/evaluation/compute_metrics.py`, `compute_missing_kappa.py` | CPU | yes |
+| 6 | Linear probing | `src/probing/probe_temporal_signal.py` | GPU (T4 in 4-bit is enough) | yes (Section 4.2) |
+| 7 | ORPO pairs | `src/orpo/build_orpo_pairs.py`, `rebalance_existing_pairs.py` | Mistral API key | yes (Section 4.3) |
+| 8 | ORPO training | `src/orpo/train_orpo_mistral7b.py` | GPU (A100 used) | yes |
+| 9 | ORPO evaluation | `src/orpo/evaluate_orpo.py` | GPU, or CPU from archived predictions | yes |
+| 10 | Publication | `src/publishing/*.py` | Hugging Face login | yes |
 
-```
-Phase 1: EXTRACTION          Phase 2: SAMPLING           Phase 3: ANNOTATION
-                │                    │                        │
-                ▼                    ▼                        ▼
-         AMF (API REST)    →   Stratification        →   GOLD (500 humain)
-         23,753 documents     Rigorous (15,000)          → Mistral Mass (14,500)
-                                                         → IAA Validation (200)
-                │
-                ▼
-         Phase 4: EVALUATION
-         
-         benchmark_temporal_drift.py
-         Mesure du biais par époque temporelle
-         Base policy: Mistral-7B (3-shot)
-         
-                │
-                ▼
-         Phase 5: ORPO PAIRS
-         
-         build_orpo_pairs.py
-         Rejection sampling sur erreurs observées
-         
-                │
-                ▼
-         Phase 6: TRAINING
-         
-         train_orpo_mistral7b.py
-         Fine-tuning QLoRA + ORPO (GPU requis)
-         
-                │
-                ▼
-         evaluate_orpo.py
-         Comparaison Base vs ORPO
-         
-                │
-                ▼
-         Phase 7: PUBLISHING
-         
-         publish_dataset_to_hf.py
-         publish_model_to_hf.py
-```
+`src/annotation/annotation_mistral_mass.py` and `validation_iaa.py` (LLM annotation of the
+pool and Cohen's κ against a human annotator) belong to the planned 500-paragraph hold-out and
+were not used for any reported result.
 
 ---
 
-## Phase 1: EXTRACTION
+## 1. Corpus extraction
 
-**Script**: `src/extraction/process_amf_extraction.py`
-
-### Rôle
-Télécharge les 23,753 documents AMF via l'API REST, extrait les paragraphes, applique un nettoyage robuste.
-
-### Commande type
-```bash
-python src/extraction/process_amf_extraction.py
-python src/extraction/process_amf_extraction.py --workers 3 --batch 30 --resume
-```
-
-### Entrée
-- AMF REST API (authentification par clé API, config `.env`)
-
-### Sortie
-- `data/frafin_raw_{TS}.csv` — Dump brut (23,753 lignes)
-- `data/frafin_raw_{TS}.parquet` — Format Parquet (compressé)
-- `data/frafin_processor_{TS}.log` — Journal des erreurs
-
-### Infrastructure
-- **Type**: CPU
-- **Durée**: 30-60 minutes
-- **Ressources**: ~2 GB RAM
-
-### Caractéristiques
-- Gestion du checkpoint JSON → reprise après crash
-- Limitation des workers (3 par défaut) pour éviter throttle
-- Nettoyage unicode robuste
-- Suppression des duplicatas au niveau texte
-
----
-
-## Phase 2: SAMPLING
-
-**Script**: `src/sampling/build_annotation_sample_rigorous.py` *(à localiser)*
-
-### Rôle
-Stratification rigoureuse pour construire un échantillon représentatif de 15,000 paragraphes.
-
-### Commande type
-```bash
-python src/sampling/build_annotation_sample_rigorous.py \
-  --input data/frafin_raw_{TS}.parquet \
-  --output data/frafin_sample_rigorous_{TS}.parquet \
-  --n-samples 15000 --seed 42
-```
-
-### Entrée
-- `data/frafin_raw_{TS}.parquet` (Phase 1)
-
-### Sortie
-- `data/frafin_sample_rigorous_{TS}.parquet` (15,000 lignes)
-- `data/stratum_table_{TS}.csv` — Résumé stratification
-- `data/sampling_report_rigorous_{TS}.json` — Statistiques
-
-### Infrastructure
-- **Type**: CPU
-- **Durée**: 2-5 minutes
-- **Ressources**: ~3 GB RAM
-
-### Méthodologie
-- Stratification: année_bucket (4) × csrd_quartile (4) = 16 strates
-- Diversification round-robin par doc_group
-- Plancher minimum par strate
-- SEED=42 pour reproductibilité
-
----
-
-## Phase 3: ANNOTATION
-
-### 3a. Export GOLD
-
-**Script**: `src/annotation/export_gold_for_annotation.py`
-
-Sélectionne 500 paragraphes stratifiés pour annotation manuelle.
+Input: the AMF metadata export `flux-amf-new-prod.csv`, downloaded from
+[info-financiere.gouv.fr](https://www.info-financiere.gouv.fr) and placed at the repository
+root. The script filters issuers, language and period, downloads each PDF, extracts the text
+with `pdfplumber` and rebuilds paragraphs. No API key is needed.
 
 ```bash
-python src/annotation/export_gold_for_annotation.py \
-  --input data/frafin_sample_rigorous_{TS}.parquet \
-  --output data/frafin_gold_500_{TS}.xlsx \
-  --n-gold 500 --n-iaa 200 --seed 42
+python src/extraction/process_amf_extraction.py              # --workers 3 --batch 30 by default
+python src/extraction/process_amf_extraction.py --resume     # continue after an interruption
 ```
 
-**Sortie**: `data/frafin_gold_500_{TS}.xlsx`, `data/gold_sampling_report_{TS}.json`
+Output: `frafin_raw_{TS}.parquet` and `.csv` (313,898 paragraphs for the release),
+`run_meta_{TS}.json` (volumes, SHA-256 of the export), a log file and a checkpoint of the
+URLs already processed. Most users should take the corpus from the Hub instead.
 
-**Durée**: 1-2 minutes | **Type**: CPU
-
-**Notes**: 200 des 500 = IAA subset (ré-annotation indépendante)
-
----
-
-### 3b. Annotation de Masse (Mistral)
-
-**Script**: `src/annotation/annotation_mistral_mass.py`
-
-Annote 14,500 paragraphes (pool ∖ GOLD) + ré-annote 200 IAA indépendamment.
+## 2. Stratified pool
 
 ```bash
-python src/annotation/annotation_mistral_mass.py --mode mass --resume
-python src/annotation/annotation_mistral_mass.py --mode iaa
+python src/sampling/build_annotation_sample_rigorous.py --input data/frafin_raw_{TS}.parquet
 ```
 
-**Entrée**: `data/frafin_sample_rigorous_{TS}.parquet`, GOLD annoté à la main
+Accepts the raw extraction or the Hub corpus. Output: `frafin_sample_rigorous_{TS}.parquet`
+(14,974 paragraphs for the release), `stratum_table_{TS}.csv`,
+`sampling_report_rigorous_{TS}.json`. Method in [data.md](data.md#stratified-pool).
 
-**Sortie**: `data/frafin_mass_annotated_{TS}.parquet`, `data/iaa_mistral_annotations_{TS}.parquet`
-
-**Durée**: 3-6 heures | **Type**: API (CPU) | **Coût**: €50-100
-
-**Caractéristiques**:
-- Température = 0.0 (reproductibilité stricte)
-- Validation JSON + retry automatique
-- Guard-fous anti-data-leakage
-
----
-
-### 3c. Validation IAA
-
-**Script**: `src/annotation/validation_iaa.py`
-
-Calcule Kappa de Cohen (humain vs Mistral) sur 200 paragraphes IAA.
+## 3. Annotation workbook
 
 ```bash
-python src/annotation/validation_iaa.py \
-  --gold data/frafin_gold_500_{TS}.xlsx \
-  --mistral-iaa data/iaa_mistral_annotations_{TS}.parquet \
-  --bootstrap-n 2000
+python src/annotation/export_gold_for_annotation.py --input data/frafin_sample_rigorous_{TS}.parquet \
+    --n-gold 500 --n-iaa 200 --seed 42
 ```
 
-**Sortie**: `data/iaa_report_{TS}.json`, confusion matrices, disagreements
+Output: `frafin_gold_500_{TS}.xlsx`, a blind annotation workbook. Protocol in
+[annotation_protocol.md](annotation_protocol.md).
 
-**Durée**: 5-10 minutes | **Type**: CPU | **Ressources**: 2 GB RAM
-
----
-
-## Phase 4: EVALUATION
-
-**Script**: `src/evaluation/benchmark_temporal_drift.py`
-
-Mesure le biais du modèle de base (Mistral-7B) par époque temporelle.
+To work with the released Gold Standard instead, download it:
 
 ```bash
-python src/evaluation/benchmark_temporal_drift.py \
-  --pool data/frafin_sample_rigorous_{TS}.parquet \
-  --gold-annotations data/frafin_mass_annotated_{TS}.parquet \
-  --model-id mistralai/Mistral-7B-Instruct-v0.3 \
-  --n-shot 3 \
-  --output data/predictions_shot3_{TS}.csv
+python src/publishing/fetch_gold_from_hf.py   # → data/gold_150_annotated_clean_reformulated_without.xlsx
 ```
 
-**Entrée**: Pool annoté, modèle Mistral-7B-Instruct-v0.3
-
-**Sortie**: `data/predictions_shot3_{TS}.csv`, `data/benchmark_report_{TS}.json`
-
-**Durée**: 30-90 minutes | **Type**: GPU recommandé | **Ressources**: 8+ GB VRAM
-
-**Résultat clé** (FNR par époque):
-- 2010-2014: 66.7% ← **Biais majeur**
-- 2015-2019: 45.2%
-- 2020-2022: 28.3%
-- 2023-2026: 12.1%
-
----
-
-## Phase 5: ORPO PAIRS
-
-**Script**: `src/orpo/build_orpo_pairs.py`
-
-Construit paires (chosen, rejected) par rejection sampling sur erreurs observées.
+## 4. Four-LLM benchmark
 
 ```bash
-python src/orpo/build_orpo_pairs.py \
-  --pool data/frafin_sample_rigorous_{TS}.parquet \
-  --predictions data/predictions_shot3_{TS}.csv \
-  --target-pairs 1000 \
-  --output data/orpo/orpo_pairs_{TS}.jsonl \
-  --resume
+python src/evaluation/benchmark_temporal_drift.py --n-shot 0
+python src/evaluation/benchmark_temporal_drift.py --n-shot 3
+python src/evaluation/benchmark_temporal_drift.py --n-shot 3 --model mistral-7b --limit 10   # quick test
 ```
 
-**Entrée**: Pool annoté, prédictions Phase 4, Mistral Large API
+Models: `open-mistral-7b`, `mistral-large-latest`, `gpt-4o`, `claude-sonnet-4-6`, at
+temperature 0 and seed 42. Needs `MISTRAL_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
+(only for the models you run). Zero-shot evaluates the 140 Gold paragraphs; 3-shot removes the
+three few-shot examples and evaluates 137. `--resume` continues from the per-model checkpoint.
 
-**Sortie**: `data/orpo/orpo_pairs_{TS}.jsonl`, `data/orpo/orpo_pairs_report_{TS}.json`
+Output: `data/results/predictions_shot{0,3}_{TS}.csv` (schema in
+[data.md](data.md#files-written-by-the-pipeline)).
 
-**Durée**: 2-8 heures | **Type**: API (CPU) | **Coût**: €30-50
-
-**Stratégie**:
-- **Type A (correction FN)**: silver=CSRD réel, base=none
-- **Type B (garde-fou FP)**: silver=none réel, base=CSRD
-- Échantillonnage prioritaire sur 2010-2014 et 2015-2019
-- Exclusion stricte du Gold
-
----
-
-## Phase 6: TRAINING ORPO
-
-**Script**: `src/orpo/train_orpo_mistral7b.py`
-
-Fine-tuning QLoRA + ORPO de Mistral-7B sur les paires.
+## 5. Metrics
 
 ```bash
-# CPU validation (aucun GPU requis)
-python src/orpo/train_orpo_mistral7b.py \
-  --pairs data/orpo/orpo_pairs_{TS}.jsonl \
-  --check-data-only
-
-# GPU training (Colab, RunPod, local)
-python src/orpo/train_orpo_mistral7b.py \
-  --pairs data/orpo/orpo_pairs_{TS}.jsonl \
-  --epochs 3 --beta 0.1 \
-  --output outputs/mistral7b-orpo-csrd
+python src/evaluation/compute_metrics.py --csv data/results/predictions_shot0_{TS}.csv
+python src/evaluation/compute_missing_kappa.py --csv data/results/predictions_shot3_{TS}.csv --model-key mistral-7b
 ```
 
-**Entrée**: `data/orpo/orpo_pairs_{TS}.jsonl`
+`compute_metrics.py` computes binary F1, Cohen's κ with bootstrap intervals (B = 2000 globally,
+500 per era, seed 42), FNR and FPR per era, McNemar tests between models and per-category
+scores. Output: `metrics_computed_{TS}.json`, `latex_tables_{TS}.tex`, `fnr_by_epoch_{TS}.csv`,
+`confusion_matrices/`. `compute_missing_kappa.py` computes the binary κ of Table 4 from any
+predictions file, without API calls.
 
-**Sortie**: `outputs/mistral7b-orpo-csrd/` (adapter LoRA)
-
-**Durée**: 1-3 heures | **Type**: GPU REQUIS | **Ressources**: T4 16GB min (Colab), A100/L4 idéal
-
-**Hyperparamètres**:
-- Modèle: Mistral-7B-Instruct-v0.3
-- Quantification: 4-bit NF4 (QLoRA)
-- Rang LoRA: r=16, alpha=32
-- Learning rate: 5e-4
-- Perte ORPO: β = 0.1
-
----
-
-## Phase 7: EVALUATION ORPO
-
-**Script**: `src/orpo/evaluate_orpo.py`
-
-Évalue le modèle ORPO entraîné sur le GOLD set complet (140-150 paragraphes).
+## 6. Linear probing
 
 ```bash
-python src/orpo/evaluate_orpo.py \
-  --adapter-dir outputs/mistral7b-orpo-csrd/final_adapter \
-  --gold data/gold_150_annotated_clean_reformulated_without.xlsx \
-  --baseline-csv data/predictions_shot3_{TS}.csv \
-  --out data/orpo/eval_report_orpo.json
+python src/probing/probe_temporal_signal.py --check-data-only          # no GPU
+python src/probing/probe_temporal_signal.py --4bit --save-representations
+python src/probing/probe_temporal_signal.py --load-representations data/probing/representations_{TS}.npz
 ```
 
-**Entrée**: Adapter LoRA, GOLD, prédictions baseline
+Extracts the last-token hidden state of Mistral-7B-Instruct-v0.3 at its 33 layers for each Gold
+paragraph (raw text, no prompt), then fits one L2 logistic regression per layer (C = 0.1,
+stratified 5-fold CV) to predict the era, and runs a 200-permutation test on the best layer.
+Output in `data/probing/`: `probing_results_{TS}.json` and `.csv`, `figure_probing_{TS}.png`.
+The paper's run is archived in [`data/results/probing/`](../data/results/probing/).
 
-**Sortie**: `data/orpo/eval_report_orpo.json`, `data/orpo/predictions_orpo_{TS}.csv`
-
-**Durée**: 5-15 minutes | **Type**: GPU recommandé | **Ressources**: 8+ GB VRAM
-
----
-
-## Phase 8: PUBLISHING
-
-### 8a. Publish Dataset
-
-**Script**: `src/publishing/publish_dataset_to_hf.py`
+## 7. ORPO pairs
 
 ```bash
-python src/publishing/publish_dataset_to_hf.py \
-  --gold data/frafin_gold_500_{TS}.xlsx \
-  --mass data/frafin_mass_annotated_{TS}.parquet \
-  --repo-id cheikhibra/FinCAC40 \
-  --private
+python src/orpo/build_orpo_pairs.py --dry-run          # sampling plan, no API call
+python src/orpo/build_orpo_pairs.py --target-pairs 1000
+python src/orpo/build_orpo_pairs.py --resume           # continue; capped by --max-calls (6000)
+python src/orpo/rebalance_existing_pairs.py --input data/orpo/orpo_pairs_{TS}.jsonl
 ```
 
-### 8b. Publish Model
+Rejection sampling on the pool, Gold excluded: `mistral-large-latest` gives a silver label,
+`open-mistral-7b` answers in 3-shot with the benchmark's prompt, and each disagreement becomes
+a `chosen`/`rejected` pair. `rebalance_existing_pairs.py` caps type A at five times the
+guardrail pairs and oversamples those three times — the Run 2 setting — without API calls.
+Output: `data/orpo/orpo_pairs_{TS}.jsonl`, `orpo_pairs_rebalanced_{TS}.jsonl`, statistics and a
+checkpoint. See [INCIDENT_NOTE.md](INCIDENT_NOTE.md) for why each safeguard exists.
 
-**Script**: `src/publishing/publish_model_to_hf.py`
+## 8. ORPO training
 
 ```bash
-python src/publishing/publish_model_to_hf.py \
-  --adapter-dir outputs/mistral7b-orpo-csrd \
-  --repo-id cheikhibra/Mistral-7B-ORPO-CSRD \
-  --private
+python src/orpo/train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_rebalanced_{TS}.jsonl --check-data-only
+python src/orpo/train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_rebalanced_{TS}.jsonl \
+    --gold data/gold_150_annotated_clean_reformulated_without.xlsx --gold-safety-check
 ```
 
----
+QLoRA 4-bit NF4, LoRA r = 16 / α = 32 / dropout 0.05 on all linear projections, ORPO β = 0.1,
+effective batch 16, seed 42. Defaults are the Run 2 settings (2 epochs, learning rate 2e-5);
+Run 1 used `--epochs 3 --learning-rate 5e-5`. The prompt budget is measured on the data and
+raised if needed. Output in `outputs/mistral7b-orpo-csrd/`: checkpoints, `final_adapter/`,
+`run_meta_{TS}.json`, `training_log_{TS}.json`.
 
-## Récapitulatif Infrastructure
+## 9. ORPO evaluation
 
-| Phase | Durée | Type | GPU ? | Coût |
-|-------|-------|------|-------|------|
-| 1 | 30-60 min | API | Non | Gratuit |
-| 2 | 2-5 min | CPU | Non | Gratuit |
-| 3a | 1-2 min | CPU | Non | Gratuit |
-| 3b | 3-6 h | API | Non | €50-100 |
-| 3c | 5-10 min | CPU | Non | Gratuit |
-| 4 | 30-90 min | GPU | **Oui** | Gratuit (HF) |
-| 5 | 2-8 h | API | Non | €30-50 |
-| 6 | 1-3 h | GPU | **Oui** | €5-15 (Colab) |
-| 7 | 5-15 min | GPU | Recommandé | Gratuit |
-| 8 | ~5 min | CPU | Non | Gratuit |
-
----
-
-## Configuration
-
-### .env (à la racine)
 ```bash
-AMF_API_KEY="votre_clé_amf"
-MISTRAL_API_KEY="votre_clé_mistral"
-OPENAI_API_KEY="sk-..."  # optionnel
-HUGGINGFACE_TOKEN="hf_..."
+python src/orpo/evaluate_orpo.py --adapter-dir outputs/mistral7b-orpo-csrd/final_adapter \
+    --baseline-csv data/results/predictions_shot3_{TS}.csv
+# without a GPU, from archived predictions:
+python src/orpo/evaluate_orpo.py --from-predictions data/results/orpo_run2/eval_predictions.csv \
+    --out data/orpo/eval_report_run2_recomputed.json
 ```
 
-### Structure des données
-- Toutes les données → `data/`
-- Résultats ORPO → `data/orpo/`
-- Modèles → `outputs/`
+Reports accuracy, macro-F1, binary κ with bootstrap interval, malformed-output rate, FNR and
+FPR per era under both conventions for malformed answers, the confusion matrix and the
+distribution of predicted categories. `src/orpo/diagnose_esrs2_bias.py`,
+`diagnose_truncation.py` and `compare_base_vs_orpo_colab.py` are the diagnostics used to
+analyse the failure.
 
----
+## 10. Publication
 
-## Dépannage
+```bash
+huggingface-cli login
+python src/publishing/publish_dataset_to_hf.py --corpus data/frafin_raw_{TS}.parquet \
+    --gold data/gold_150_annotated_clean_reformulated_without.xlsx --repo CID99/FinCAC40 --push
+python src/publishing/publish_model_to_hf.py --adapter outputs/mistral7b-orpo-csrd/final_adapter \
+    --repo CID99/Mistral-7B-ORPO-CSRD --pairs data/orpo/orpo_pairs_rebalanced_{TS}.jsonl \
+    --training-log outputs/mistral7b-orpo-csrd/training_log_{TS}.json \
+    --eval-report data/orpo/eval_report_orpo.json \
+    --eval-predictions data/orpo/raw_predictions_orpo_eval_report_orpo.csv --push
+```
 
-| Problème | Solution |
-|----------|----------|
-| API throttle (Phase 1) | Réduire `--workers` à 1-2 |
-| Retry exceeded (Phase 3b) | Relancer avec `--resume` |
-| CUDA OOM (Phase 6) | Réduire batch size à 1 |
-| Model not found (Phase 7) | Vérifier `final_adapter/` existe |
-
+Without `--push`, both scripts only prepare the upload in a local folder. The cards they
+upload are [`cards/dataset_card.md`](../cards/dataset_card.md) and
+[`cards/model_card.md`](../cards/model_card.md). The demo Space is in [`space/`](../space/).

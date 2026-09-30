@@ -1,7 +1,7 @@
 """
 train_orpo_mistral7b.py — Fine-Tuning QLoRA + ORPO de Mistral-7B sur les Paires de Préférence
 ═══════════════════════════════════════════════════════════════════════════════════════
-Phase 6b du pipeline FraFin-Reasoning — Remédiation du biais de récence temporelle.
+Phase 6b du pipeline FinCAC40 — Remédiation du biais de récence temporelle.
 
 RÔLE DANS LE PIPELINE :
     orpo_pairs_{TS}.jsonl              (paires chosen/rejected, Phase 6a)
@@ -41,7 +41,7 @@ CONTRAT DE DONNÉES ATTENDU (sortie de build_orpo_pairs.py) :
     et build_orpo_pairs.py — condition nécessaire pour que le modèle entraîné
     reste directement comparable au modèle de base évalué en Section 4.
 
-    [CORRECTIF] Cette identité stricte est désormais garantie par construction :
+    Cette identité stricte est désormais garantie par construction :
     SYSTEM_PROMPT est importé de shared_prompts.build_system_prompt(3), le même
     appel que celui utilisé dans build_orpo_pairs.py pour générer chosen/rejected.
     Avant ce correctif, les 3 scripts (benchmark, build_pairs, train) redéfinissaient
@@ -96,13 +96,13 @@ Dépendances (environnement GPU) :
 
 Usage :
     # Validation locale des données (aucun GPU requis) :
-    python train_orpo_mistral7b.py --check-data-only --pairs data/orpo/orpo_pairs_XXX.jsonl
+    python src/orpo/train_orpo_mistral7b.py --check-data-only --pairs data/orpo/orpo_pairs_XXX.jsonl
 
     # Entraînement (environnement GPU — Colab / RunPod / poste avec GPU) :
-    python train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_XXX.jsonl
-    python train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_XXX.jsonl --epochs 3 --beta 0.1
-    python train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_XXX.jsonl --resume-from-checkpoint outputs/checkpoint-100
-    python train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_XXX.jsonl --merge-and-save
+    python src/orpo/train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_XXX.jsonl
+    python src/orpo/train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_XXX.jsonl --epochs 3 --beta 0.1
+    python src/orpo/train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_XXX.jsonl --resume-from-checkpoint outputs/checkpoint-100
+    python src/orpo/train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_XXX.jsonl --merge-and-save
 """
 
 from __future__ import annotations
@@ -111,16 +111,20 @@ import argparse
 import json
 import logging
 import sys
-from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
+# Rend le paquet `src` importable quand le script est lancé par son chemin
+# depuis la racine du dépôt : python src/<module>/<script>.py
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from src.evaluation.shared_prompts import build_system_prompt  # noqa: E402
-# ↑ CORRECTIF : ce script redéfinissait auparavant sa propre 3e copie du system prompt
+# ↑ ce script redéfinissait auparavant sa propre 3e copie du system prompt
 # (TAXONOMY_BLOCK + TASK_BLOCK_POLICY, en 0-shot) pour reconstruire le prompt complet
 # d'entraînement à partir du champ "prompt" du JSONL (qui ne contient que le tour
 # utilisateur). Si ce prompt reconstruit diverge de celui utilisé au moment de générer
@@ -154,7 +158,7 @@ LORA_TARGET_MODULES = [
 
 # ── Hyperparamètres ORPO (Hong et al., 2024) ──────────────────────────────────
 ORPO_BETA           = 0.1     # λ — poids du terme de ratio de cotes
-# CORRECTIF CRITIQUE : ces valeurs dataient d'avant le passage du system prompt
+# ces valeurs dataient d'avant le passage du system prompt
 # de politique à 3-shot (cf. shared_prompts.py). Le system prompt 3-shot fait
 # ~8244 caractères (~2100-2500 tokens selon le tokenizer réel), largement au-delà
 # de l'ancien MAX_PROMPT_LENGTH=768. Avec truncation_mode="keep_end" (défaut
@@ -169,7 +173,7 @@ MAX_COMPLETION_LENGTH = 256
 MAX_LENGTH           = MAX_PROMPT_LENGTH + MAX_COMPLETION_LENGTH
 
 # ── Hyperparamètres d'entraînement ────────────────────────────────────────────
-# [AJOUT — préparation du "dernier run"] lr et epochs abaissés par prudence
+# lr et epochs abaissés par prudence
 # défensive suite au collapse observé (FNR=0 partout, accuracy=0.164). Note
 # importante : la cause PRINCIPALE du collapse était le déséquilibre extrême
 # des paires (97% Type A), corrigé en amont via balance_pairs(
@@ -196,7 +200,6 @@ LR_SCHEDULER              = "cosine"
 WARMUP_RATIO               = 0.05
 LOGGING_STEPS              = 10
 EVAL_STEPS                 = 50
-SAVE_STEPS                 = 50
 WEIGHT_DECAY                = 0.01
 MAX_GRAD_NORM                = 0.3   # standard QLoRA — évite l'instabilité en 4-bit
 
@@ -360,7 +363,6 @@ def stratified_split(
     dans le monitoring de validation, évitant un signal d'eval trompeur sur
     un volume de données restreint.
     """
-    rng = np.random.RandomState(seed)
     df = df.copy()
     df["_stratum"] = df["epoch"].astype(str) + "__" + df["pair_type"].astype(str)
 
@@ -410,24 +412,24 @@ def build_hf_dataset_records(df: pd.DataFrame) -> list[dict]:
 
 def print_data_report(train_df: pd.DataFrame, val_df: pd.DataFrame) -> None:
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  RAPPORT DE DONNÉES — Paires ORPO")
+    logger.info("  RAPPORT DE DONNÉES — Paires ORPO")
     logger.info(f"{'═'*65}")
 
     for name, d in [("TRAIN", train_df), ("VALIDATION", val_df)]:
         logger.info(f"\n  [{name}] n = {len(d)}")
         if len(d) == 0:
             continue
-        logger.info(f"    Par époque :")
+        logger.info("    Par époque :")
         for ep, n in d["epoch"].value_counts().reindex(EPOCH_ORDER, fill_value=0).items():
             logger.info(f"      {ep:<12} {n}")
-        logger.info(f"    Par type de paire :")
+        logger.info("    Par type de paire :")
         for t, n in d["pair_type"].value_counts().items():
             logger.info(f"      {t:<25} {n}")
 
     # Statistiques de longueur (approximation par nombre de mots, sans tokenizer)
     prompt_lens = train_df["prompt"].astype(str).str.split().str.len()
     chosen_lens = train_df["chosen"].astype(str).str.split().str.len()
-    logger.info(f"\n  Longueurs approximatives (en mots, hors tokenisation) :")
+    logger.info("\n  Longueurs approximatives (en mots, hors tokenisation) :")
     logger.info(f"    Prompt utilisateur : moyenne={prompt_lens.mean():.0f}, "
                 f"max={prompt_lens.max()}")
     logger.info(f"    Chosen JSON        : moyenne={chosen_lens.mean():.0f}, "
@@ -511,29 +513,70 @@ def run_training(
     # plus long. Ce garde-fou aurait détecté immédiatement l'incident précédent
     # (MAX_PROMPT_LENGTH=768 vs system prompt réel ~2100-2500 tokens, causant une
     # troncature à 67% du prompt système) au lieu de le découvrir après 2h de
-    # calcul Colab. On ne bloque pas l'entraînement (au cas où l'utilisateur sait
-    # ce qu'il fait), mais on avertit fort si la marge est insuffisante.
+    # calcul Colab.
+
+    # Deux corrections par rapport à la version précédente :
+    #   (1) La marge recommandée n'est plus une estimation fixe (+400) mais
+    #       MESURÉE avec le vrai tokenizer sur le plus long extrait réellement
+    #       présent dans train_records + val_records — précis pour CE dataset,
+    #       pas une supposition générique qui peut être fausse pour un autre.
+    #   (2) Le script ARRÊTE par défaut si la marge est insuffisante, au lieu
+    #       d'attendre 10s et de continuer silencieusement. Sur un run final
+    #       payant, "continuer quand même" ne doit jamais être le comportement
+    #       par défaut d'une alerte de troncature — --force-truncation-risk
+    #       permet de passer outre explicitement si l'utilisateur le décide.
     system_prompt_n_tokens = len(tokenizer(SYSTEM_PROMPT, add_special_tokens=False)["input_ids"])
+
+    all_extracts = [r["prompt"] for r in train_records] + [r["prompt"] for r in val_records]
+    # r["prompt"] contient déjà le SYSTEM_PROMPT + extrait concaténés (format_prompt()) ;
+    # on retokenise l'ensemble pour mesurer le VRAI besoin total par exemple, le plus
+    # long déterminant le budget nécessaire.
+    extract_lengths = [
+        len(tokenizer(text, add_special_tokens=False)["input_ids"])
+        for text in all_extracts
+    ]
+    max_full_prompt_tokens = max(extract_lengths) if extract_lengths else system_prompt_n_tokens
+    safety_buffer = 32   # marge pour tokens spéciaux / variations mineures de tokenisation
+    recommended_max_prompt_length = max_full_prompt_tokens + safety_buffer
+
     margin_for_extract = args.max_prompt_length - system_prompt_n_tokens
     logger.info(
         f"\n  ── Vérification budget de troncature ──\n"
-        f"    System prompt (seul)      : {system_prompt_n_tokens} tokens\n"
-        f"    --max-prompt-length       : {args.max_prompt_length} tokens\n"
+        f"    System prompt (seul)             : {system_prompt_n_tokens} tokens\n"
+        f"    Prompt complet le plus long (mesuré, {len(all_extracts)} exemples) : "
+        f"{max_full_prompt_tokens} tokens\n"
+        f"    --max-prompt-length actuel       : {args.max_prompt_length} tokens\n"
         f"    Marge restante pour l'extrait utilisateur : {margin_for_extract} tokens"
     )
-    if margin_for_extract < 200:
-        survived_fraction = min(1.0, args.max_prompt_length / max(1, system_prompt_n_tokens))
+
+    if args.max_prompt_length < recommended_max_prompt_length:
+        old_max_prompt = args.max_prompt_length
+        old_max_length = args.max_length
+
+        # Corrige automatiquement les deux valeurs plutôt que
+        # d'arrêter le script en demandant à l'utilisateur de relancer avec
+        # les bons chiffres — plus aucune action manuelle requise.
+        args.max_prompt_length = recommended_max_prompt_length
+        args.max_length = args.max_prompt_length + MAX_COMPLETION_LENGTH
+
         logger.warning(
-            f"  ⚠⚠⚠ ALERTE TRONCATURE : le system prompt à lui seul consomme "
-            f"{system_prompt_n_tokens}/{args.max_prompt_length} tokens du budget "
-            f"--max-prompt-length. Avec truncation_mode='keep_end' (défaut ORPOConfig), "
-            f"seuls ~{survived_fraction*100:.0f}% du prompt système survivraient à la "
-            f"troncature (TAXONOMY_BLOCK et une partie des few-shot seraient perdus). "
-            f"Augmente --max-prompt-length (recommandé ≥ {system_prompt_n_tokens + 400}) "
-            f"avant de lancer un entraînement long. Poursuite dans 10s si tu ne coupes pas..."
+            f"\n  🔧 AUTO-CORRECTION : --max-prompt-length était insuffisant "
+            f"({old_max_prompt}) pour le prompt le plus long de vos données "
+            f"({max_full_prompt_tokens} tokens). Ajustement automatique :\n"
+            f"       --max-prompt-length : {old_max_prompt} → {args.max_prompt_length}\n"
+            f"       --max-length         : {old_max_length} → {args.max_length}\n"
+            f"     Aucune action de votre part n'est nécessaire, l'entraînement "
+            f"continue avec ces valeurs corrigées."
         )
-        import time
-        time.sleep(10)
+        if args.max_prompt_length > 4000:
+            logger.warning(
+                f"     ⚠ Note VRAM : {args.max_prompt_length} tokens de contexte est "
+                f"élevé pour un GPU 16 Go. Si vous rencontrez un OOM, relancez avec "
+                f"--per-device-batch 1 --grad-accum 32 (batch effectif inchangé)."
+            )
+    else:
+        logger.info(f"  ✅ Budget suffisant (marge de sécurité : "
+                    f"{args.max_prompt_length - max_full_prompt_tokens} tokens)")
 
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
@@ -564,7 +607,7 @@ def run_training(
     # ── Configuration ORPO ────────────────────────────────────────────────────
     output_dir = str(OUTPUT_DIR)
 
-    # CORRECTIF : sur un petit dataset ORPO (quelques centaines de paires), le
+    # sur un petit dataset ORPO (quelques centaines de paires), le
     # nombre total de steps est très faible (~effectif_train / batch_effectif *
     # epochs). Avec les anciennes constantes fixes EVAL_STEPS=SAVE_STEPS=50, un
     # run de ~277 exemples train / batch effectif 16 / 3 epochs ne fait qu'environ
@@ -616,7 +659,7 @@ def run_training(
     if val_ds is not None:
         orpo_kwargs[eval_kwarg_name] = "steps"
         orpo_kwargs["eval_steps"] = dynamic_eval_steps
-        # CORRECTIF : le script ne sélectionnait auparavant jamais le meilleur
+        # le script ne sélectionnait auparavant jamais le meilleur
         # checkpoint (load_best_model_at_end absent) — le modèle sauvegardé était
         # systématiquement celui du dernier step, pas nécessairement le meilleur
         # sur validation. Sur un dataset de cette taille, le risque de dérive en
@@ -628,7 +671,7 @@ def run_training(
         orpo_kwargs["greater_is_better"] = False
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=4))
 
-        # [AJOUT — mise en garde] eval_loss et rewards/accuracies sont mesurés
+        # eval_loss et rewards/accuracies sont mesurés
         # sur un split de VALIDATION issu du MÊME fichier de paires que le train
         # (stratified_split préserve les proportions par pair_type). Si ce
         # fichier reste déséquilibré (même après rééquilibrage, un résidu de
@@ -638,14 +681,14 @@ def run_training(
         # `load_best_model_at_end` + `EarlyStoppingCallback` protègent contre
         # la DÉRIVE en fin d'entraînement, mais PAS contre un biais présent dès
         # le début du dataset. Le seul juge fiable du succès réel est
-        # l'évaluation externe sur le Gold-140 (06_evaluate_orpo.py, qui
+        # l'évaluation externe sur le Gold-140 (evaluate_orpo.py, qui
         # rapporte désormais le FPR en plus du FNR) — ne pas conclure au succès
         # sur la seule base d'un eval_loss qui descend.
         logger.warning(
             "\n  ⚠ RAPPEL : eval_loss (ci-dessous) est mesuré sur un split "
             "interne partageant la distribution du train set. Une baisse "
             "d'eval_loss NE garantit PAS l'absence de collapse de classe. "
-            "Seule l'évaluation externe sur le Gold-140 (06_evaluate_orpo.py, "
+            "Seule l'évaluation externe sur le Gold-140 (evaluate_orpo.py, "
             "qui rapporte le FPR) fait foi pour juger ce run."
         )
     else:
@@ -686,7 +729,7 @@ def run_training(
 
     # ── Entraînement ───────────────────────────────────────────────────────────
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  DÉBUT DE L'ENTRAÎNEMENT ORPO")
+    logger.info("  DÉBUT DE L'ENTRAÎNEMENT ORPO")
     logger.info(f"{'═'*65}")
 
     resume_ckpt = args.resume_from_checkpoint if args.resume_from_checkpoint else None
@@ -742,7 +785,7 @@ def run_training(
 
     # ── Fusion optionnelle LoRA → poids complets ──────────────────────────────
     if args.merge_and_save:
-        logger.info(f"\n  Fusion de l'adaptateur LoRA dans les poids de base...")
+        logger.info("\n  Fusion de l'adaptateur LoRA dans les poids de base...")
         merged_model = trainer.model.merge_and_unload()
         merged_dir = OUTPUT_DIR / "merged_model"
         merged_model.save_pretrained(str(merged_dir))
@@ -751,13 +794,13 @@ def run_training(
                     f"(⚠ occupe ~14-15 Go sur disque en bfloat16)")
 
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  ENTRAÎNEMENT TERMINÉ")
+    logger.info("  ENTRAÎNEMENT TERMINÉ")
     logger.info(f"{'═'*65}")
-    logger.info(f"  ⚙  Prochaine étape : évaluation comparative sur Gold-140")
-    logger.info(f"     (Base Mistral-7B zero-shot vs Mistral-7B-ORPO-CSRD)")
-    logger.info(f"     Réutilisez le prompt SYSTEM_PROMPT de ce script pour")
-    logger.info(f"     charger l'adaptateur et générer les prédictions à comparer")
-    logger.info(f"     aux résultats de la Section 4 (FNR par époque notamment).")
+    logger.info("  ⚙  Prochaine étape : évaluation comparative sur Gold-140")
+    logger.info("     (Base Mistral-7B zero-shot vs Mistral-7B-ORPO-CSRD)")
+    logger.info("     Réutilisez le prompt SYSTEM_PROMPT de ce script pour")
+    logger.info("     charger l'adaptateur et générer les prédictions à comparer")
+    logger.info("     aux résultats de la Section 4 (FNR par époque notamment).")
     logger.info(f"{'═'*65}")
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -766,7 +809,7 @@ def run_training(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="FraFin-Reasoning — Fine-tuning QLoRA+ORPO de Mistral-7B (Phase 6b)"
+        description="FinCAC40 — Fine-tuning QLoRA+ORPO de Mistral-7B (Phase 6b)"
     )
     p.add_argument("--pairs", required=True,
                    help="Fichier JSONL produit par build_orpo_pairs.py")
@@ -813,7 +856,7 @@ def main():
     VAL_FRACTION = args.val_fraction
 
     logger.info("═" * 65)
-    logger.info("  FraFin-Reasoning — Entraînement QLoRA + ORPO (Phase 6b)")
+    logger.info("  FinCAC40 — Entraînement QLoRA + ORPO (Phase 6b)")
     logger.info(f"  Modèle de base : {args.base_model}")
     logger.info(f"  Mode           : {'VALIDATION DES DONNÉES SEULE' if args.check_data_only else 'ENTRAÎNEMENT COMPLET'}")
     logger.info("═" * 65)
@@ -831,15 +874,15 @@ def main():
     val_records   = build_hf_dataset_records(val_df)
 
     if args.check_data_only:
-        logger.info(f"\n  [--check-data-only] Aperçu d'un prompt formaté (premier exemple train) :")
+        logger.info("\n  [--check-data-only] Aperçu d'un prompt formaté (premier exemple train) :")
         logger.info(f"  {'─'*61}")
         preview = train_records[0]["prompt"][:600]
         logger.info(f"  {preview}...")
         logger.info(f"  {'─'*61}")
         logger.info(f"\n  Aperçu chosen  : {train_records[0]['chosen'][:200]}")
         logger.info(f"  Aperçu rejected: {train_records[0]['rejected'][:200]}")
-        logger.info(f"\n  ✅ Données validées. Relancez sans --check-data-only sur un "
-                    f"environnement GPU pour lancer l'entraînement.")
+        logger.info("\n  ✅ Données validées. Relancez sans --check-data-only sur un "
+                    "environnement GPU pour lancer l'entraînement.")
         return
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

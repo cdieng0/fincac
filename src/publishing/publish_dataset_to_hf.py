@@ -1,5 +1,5 @@
 """
-publish_to_hf.py — Prépare et publie FReCAP sur le Hugging Face Hub
+publish_dataset_to_hf.py — Prépare et publie FReCAP sur le Hugging Face Hub
 ═══════════════════════════════════════════════════════════════════════════════════════
 Convertit vos fichiers locaux au format attendu par le Dataset Viewer, vérifie
 l'intégrité, puis pousse sur le Hub.
@@ -13,15 +13,15 @@ Prérequis :
 
 Usage :
     # 1. Vérification sans rien publier (recommandé en premier)
-    python publish_to_hf.py --corpus data/frafin_raw_XXXX.parquet \\
+    python src/publishing/publish_dataset_to_hf.py --corpus data/frafin_raw_XXXX.parquet \\
                             --gold data/gold_150_annotated_clean_reformulated_without.xlsx \\
                             --repo VOTRE_USERNAME/FReCAP
 
     # 2. Publication réelle
-    python publish_to_hf.py --corpus ... --gold ... --repo ... --push
+    python src/publishing/publish_dataset_to_hf.py --corpus ... --gold ... --repo ... --push
 
     # Publier en privé d'abord (fortement conseillé pour une première fois)
-    python publish_to_hf.py --corpus ... --gold ... --repo ... --push --private
+    python src/publishing/publish_dataset_to_hf.py --corpus ... --gold ... --repo ... --push --private
 """
 
 from __future__ import annotations
@@ -159,7 +159,7 @@ def check(df: pd.DataFrame, name: str, is_gold: bool) -> bool:
     # L unicite se verifie sur row_id : paragraph_id est un hash de contenu,
     # legitimement repete pour le boilerplate (voir clean()).
     if "row_id" in df.columns and int(df["row_id"].duplicated().sum()):
-        print(f"  ⚠  row_id dupliqué — identifiant de ligne non unique")
+        print("  ⚠  row_id dupliqué — identifiant de ligne non unique")
         ok = False
 
     n_dup_c = int(df["paragraph_id"].duplicated().sum())
@@ -198,8 +198,8 @@ def main():
     p = argparse.ArgumentParser(description="Publie FINCAC40 sur le Hugging Face Hub")
     p.add_argument("--corpus", required=True, help="Parquet/CSV du corpus complet")
     p.add_argument("--gold", required=True, help="XLSX/CSV du Gold Standard annoté")
-    p.add_argument("--repo", required=True, help="ex. votre-username/FINCAC")
-    p.add_argument("--readme", default="README.md", help="Dataset card à téléverser")
+    p.add_argument("--repo", required=True, help="ex. CID99/FinCAC40")
+    p.add_argument("--readme", default="cards/dataset_card.md", help="Dataset card à téléverser")
     p.add_argument("--out", default="hf_build", help="Dossier de préparation local")
     p.add_argument("--push", action="store_true", help="Publie réellement (sinon : à blanc)")
     p.add_argument("--private", action="store_true", help="Crée le dépôt en privé")

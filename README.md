@@ -1,17 +1,27 @@
 # FinCAC40 — Temporal Robustness of LLMs on French Regulatory Text
 
-Research code accompanying the preprint *FinCAC40 : un corpus réglementaire français
-(2010–2026) pour l'évaluation de la robustesse temporelle des LLM en classification de
-durabilité*.
+Code, data pointers and artefacts for the preprint
+**[Regulatory Semantic Drift: When Preference-based Correction Fails Silently — FINCAC40, a Sixteen-year AMF Corpus (2010–2026) for Evaluating the Temporal Robustness of LLMs in ESG Classification](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7438503)**
+(Cheikh Ibra Dieng, SSRN, 2026).
 
-This repository contains the complete pipeline: corpus extraction from AMF filings,
-unbiased stratified sampling, expert annotation under the ESRS taxonomy, multi-LLM
-evaluation, linear probing, and a documented failure of preference optimization.
+The repository covers the full pipeline: corpus extraction from AMF filings, stratified
+sampling without filtering on the target variable, annotation under the ESRS taxonomy,
+a four-LLM evaluation, linear probing of Mistral-7B, and a documented failure of preference
+optimization.
 
+[![Paper](https://img.shields.io/badge/Paper-SSRN%207438503-b31b1b)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7438503)
 [![Dataset](https://img.shields.io/badge/🤗%20Dataset-FinCAC40-yellow)](https://huggingface.co/datasets/CID99/FinCAC40)
 [![Model](https://img.shields.io/badge/🤗%20Model-Mistral--7B--ORPO--CSRD-yellow)](https://huggingface.co/CID99/Mistral-7B-ORPO-CSRD)
 [![Demo](https://img.shields.io/badge/🤗%20Space-collapse%20demo-blue)](https://huggingface.co/spaces/CID99/FinCAC40-collapse-demo)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
+
+| Resource | Where |
+|---|---|
+| Preprint | [SSRN 7438503](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7438503) · PDF copy in [`paper/`](paper/) |
+| Corpus and Gold Standard | [huggingface.co/datasets/CID99/FinCAC40](https://huggingface.co/datasets/CID99/FinCAC40) |
+| ORPO adapter and its training artefacts | [huggingface.co/CID99/Mistral-7B-ORPO-CSRD](https://huggingface.co/CID99/Mistral-7B-ORPO-CSRD) |
+| Interactive demo | [huggingface.co/spaces/CID99/FinCAC40-collapse-demo](https://huggingface.co/spaces/CID99/FinCAC40-collapse-demo) |
+| Code, protocol, run artefacts | this repository |
 
 ---
 
@@ -23,23 +33,29 @@ mostly on recent data, systematically miss sustainability content expressed in p
 language.
 
 **The behavioural result is heterogeneous.** Two frontier models support the hypothesis
-(GPT-4o ΔFNR = +0.54, Mistral-Large +0.45), while Mistral-7B contradicts it directionally.
-With 3 to 22 relevant paragraphs per temporal window, no statistical test is conclusive — we
-report an association, not a causal effect.
+(GPT-4o ΔFNR = +0.54, Mistral-Large +0.45 in zero-shot), while Mistral-7B contradicts it
+directionally (−0.07). With 3 to 22 relevant paragraphs per temporal window, no statistical
+test is conclusive — we report an association, not a causal effect.
 
 **The most solid result is a negative one.** Attempting to correct the suspected bias with
 ORPO produced a silent collapse:
 
-| | Accuracy | Malformed output | Global FPR |
+| | Accuracy | Malformed JSON | `none` paragraphs given a CSRD label |
 |---|---|---|---|
-| Base model (3-shot) | **70.8%** | **0%** | — |
-| After ORPO (run 1) | 16.4% | — | — |
-| After ORPO (run 2) | 35.7% | **30.7%** | **64.9%** |
+| Base model (3-shot) | **70.8%** | **0%** | not measured¹ |
+| After ORPO — run 1 | 16.4% | not archived² | not archived² |
+| After ORPO — run 2 | 35.7% | **30.7%** | **36.1%** (35 / 97)³ |
 
-Every standard training signal said the run had succeeded — decreasing loss, 100% preference
-accuracy, and a False Negative Rate that reached its ideal value of zero. The FNR hit zero
-because the model stopped predicting `none` altogether, which nulls the metric mechanically
-without correcting anything. A practitioner monitoring the usual telemetry would have shipped
+¹ The false-positive rate was added to the evaluation protocol after run 1.
+² Run 1's per-example predictions were not preserved; its accuracy was recorded by the
+evaluation run itself ([`data/results/orpo_run1/`](data/results/orpo_run1/)).
+³ A further 28 `none` paragraphs got malformed output; the paper's FPR of 64.9% counts both.
+Recomputed from the archived predictions ([`data/results/orpo_run2/`](data/results/orpo_run2/)).
+
+Every standard signal said run 1 had succeeded — decreasing loss, preference accuracy reaching
+100%, and a false-negative rate that reached its ideal value of zero. The FNR hit zero because
+the model no longer answered `none`, which nulls the metric mechanically without correcting
+anything. A practitioner monitoring the usual telemetry would have shipped
 a model that had lost 54 accuracy points.
 
 ---
@@ -47,24 +63,25 @@ a model that had lost 54 accuracy points.
 ## Pipeline
 
 ```
-AMF portal (524,589 entries)
+AMF export, info-financiere.gouv.fr (524,589 entries)
         │  src/extraction/
         ▼
-313,898 paragraphs, 23,144 documents, 2010–2026
-        │  src/sampling/          stratified, no filtering on the target variable
+313,898 paragraphs from 23,144 documents, 2010–2026
+        │  src/sampling/          era × document type × keyword-density quartile
         ▼
-Gold Standard: 140 paragraphs, ESRS-annotated
-        │
-        ├─ src/evaluation/        4 LLMs × 2 regimes → FNR by epoch
+14,974-paragraph pool ──────────► src/orpo/  preference pairs (Gold excluded)
+                                             → QLoRA + ORPO → collapse
+Gold Standard: 140 ESRS-annotated paragraphs (selection: docs/data.md)
+        ├─ src/evaluation/        4 LLMs × zero-shot / 3-shot → FNR by era
         ├─ src/probing/           linear probe, 33 layers of Mistral-7B
-        └─ src/orpo/              preference pairs → QLoRA+ORPO → collapse
+        └─ src/orpo/              evaluation of the ORPO adapters
                                           │
                                           ▼  src/publishing/
                             🤗 dataset · model · demo
 ```
 
-Full step-by-step documentation, with commands, inputs, outputs and cost per stage:
-**[`docs/PIPELINE.md`](docs/PIPELINE.md)**
+Step-by-step documentation with the exact command for each stage:
+**[`docs/PIPELINE.md`](docs/PIPELINE.md)**.
 
 ---
 
@@ -73,19 +90,21 @@ Full step-by-step documentation, with commands, inputs, outputs and cost per sta
 | Path | Contents |
 |---|---|
 | `src/extraction/` | AMF corpus extraction, PDF paragraph reconstruction |
-| `src/sampling/` | Three-axis stratified sampling (epoch × doc type × CSRD density) |
-| `src/annotation/` | ESRS taxonomy, Gold export, LLM-as-judge annotation, Cohen's κ |
-| `src/evaluation/` | Multi-LLM benchmark, metrics, bootstrap confidence intervals |
-| `src/probing/` | Layer-wise linear probing of temporal signal |
-| `src/orpo/` | Preference-pair construction, QLoRA+ORPO training, failure diagnosis |
-| `src/publishing/` | Hugging Face dataset and model publication |
-| `space/` | Gradio demo comparing base vs collapsed model |
-| `data/gold/` | Gold Standard, 140 annotated paragraphs |
-| `data/results/` | Evaluation metrics, reports, per-example predictions |
-| `paper/` | LaTeX source of the preprint |
-| `archive/` | Abandoned press-scraping source, kept for transparency |
+| `src/sampling/` | Three-axis stratified sampling (era × document type × CSRD-density quartile) |
+| `src/annotation/` | ESRS taxonomy, Gold annotation workbook; LLM annotation and agreement tools (not used for the reported results) |
+| `src/evaluation/` | Four-LLM benchmark, shared prompt, metrics with bootstrap intervals |
+| `src/probing/` | Layer-wise linear probing of the temporal signal |
+| `src/orpo/` | Preference-pair construction, rebalancing, QLoRA + ORPO training, evaluation, failure diagnostics |
+| `src/publishing/` | Hugging Face publication, and retrieval of the Gold Standard from the Hub |
+| `space/` | Gradio demo comparing the base and the collapsed model |
+| `cards/` | Dataset and model cards published on Hugging Face |
+| `data/results/` | Run artefacts: probing results and figure, ORPO run configurations, logs, reports and predictions |
+| `prompts/` | The exact system prompts, zero-shot and 3-shot |
+| `docs/` | [Pipeline](docs/PIPELINE.md), [reproducibility](docs/reproducibility.md), [data](docs/data.md), [annotation protocol](docs/annotation_protocol.md), [prompts](docs/prompts.md), [ORPO incident note](docs/INCIDENT_NOTE.md), [Hugging Face](docs/huggingface.md), [known discrepancies with the preprint](docs/known_discrepancies.md) |
+| `paper/` | The preprint |
+| `tests/` | Prompt consistency, archived results reproduced against the paper, Gold and corpus checks, documentation links |
 
-Large artifacts — the 87 MB corpus and the model weights — live on Hugging Face, not here.
+The corpus (~88 MB) and the model weights live on Hugging Face, not in this repository.
 
 ---
 
@@ -93,41 +112,57 @@ Large artifacts — the 87 MB corpus and the model weights — live on Hugging F
 
 ```bash
 git clone https://github.com/cdieng0/fincac.git
-cd finsent
-pip install -r requirements.txt
+cd fincac
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements.txt           # add requirements-gpu.txt for probing and ORPO
+
+python src/publishing/fetch_gold_from_hf.py   # Gold Standard → data/
+python -m pytest                              # no API key, no GPU
 ```
 
-API keys are read from the environment. Never hardcode them:
+API keys are read from the environment, never from the code. The variables are listed in
+[`.env.example`](.env.example):
 
 ```bash
-export MISTRAL_API_KEY="..."
-export OPENAI_API_KEY="..."
-export ANTHROPIC_API_KEY="..."
+export MISTRAL_API_KEY="..."         # PowerShell: $env:MISTRAL_API_KEY = "..."
+export OPENAI_API_KEY="..."          # optional, GPT-4o in the benchmark
+export ANTHROPIC_API_KEY="..."       # optional, Claude in the benchmark
 ```
 
-The dataset is easier to obtain from the Hub than to re-extract:
+The corpus is easier to obtain from the Hub than to re-extract:
 
 ```python
 from datasets import load_dataset
-corpus = load_dataset("CID99/FinCAC40", "corpus", split="train")
-gold   = load_dataset("CID99/FinCAC40", "gold",   split="test")
+corpus = load_dataset("CID99/FinCAC40", "corpus", split="train")   # 313,608 paragraphs
+gold   = load_dataset("CID99/FinCAC40", "gold",   split="test")    # 140 paragraphs
 ```
 
 ---
 
 ## Reproducibility
 
+Each paper result is traced to its script and archived artefact in
+[`docs/reproducibility.md`](docs/reproducibility.md), and every command is in
+[`docs/PIPELINE.md`](docs/PIPELINE.md). The test suite recomputes the published ORPO run 2
+report from its per-example predictions and checks the probing and run 1 artefacts against the
+paper; the differences found between the preprint and the released code and data are listed in
+[`docs/known_discrepancies.md`](docs/known_discrepancies.md).
+
 Every stage uses `seed = 42` and `temperature = 0`. Bootstrap confidence intervals use
-B = 2000 resamples. The source AMF export is certified by its SHA256 hash, recorded in the
+B = 2000 resamples. The source AMF export is identified by its SHA-256 hash, recorded in the
 extraction run metadata.
 
-Note that fixing temperature and seed does **not** guarantee determinism on proprietary APIs:
-the served model version and serving infrastructure can change without notice. We therefore
-log the resolved model identifier for every call and archive the raw responses — that is the
-practical reproducibility guarantee, not a theoretical one.
+Fixing temperature and seed does **not** guarantee determinism on proprietary APIs: the served
+model version and serving infrastructure can change without notice. The benchmark therefore
+logs the resolved model identifier for every call.
 
-The Gold Standard is now public, which means it may enter the pretraining corpora of future
-models. Evaluations run after this release should account for that contamination.
+The prompt used by the benchmark and by the whole ORPO chain is checked byte for byte by
+[`tests/test_prompts.py`](tests/test_prompts.py) — the guard against the prompt drift described
+in [`docs/INCIDENT_NOTE.md`](docs/INCIDENT_NOTE.md).
+
+The Gold Standard is public, so it may enter the pretraining corpora of future models.
+Evaluations run after this release should account for that contamination.
 
 ---
 
@@ -135,12 +170,13 @@ models. Evaluations run after this release should account for that contamination
 
 Stated plainly, and discussed at length in the paper:
 
-- **Semantic equivalence between epochs is not established.** The FNR difference across epochs
+- **Semantic equivalence between eras is not established.** The FNR difference across eras
   may partly reflect confounds — document length, type, issuer, topic frequency — rather than
   purely lexical drift.
 - **The Gold Standard is small** (n = 140) and imbalanced: five ESRS categories are absent,
-  two have a single example.
-- **Single annotator**, no inter-annotator agreement measure in this release.
+  three have a single example. It was selected by pre-computed semantic type rather than drawn
+  proportionally from the corpus ([`docs/data.md`](docs/data.md#gold-standard)).
+- **Single annotator**, with no inter-annotator agreement measure in this release.
 - **Probing is correlational.** A linear probe shows decodability, not that the model uses that
   signal for its decisions.
 - **Survivorship bias**: only current CAC 40 members are represented.
@@ -151,15 +187,20 @@ Stated plainly, and discussed at length in the paper:
 
 ```bibtex
 @misc{dieng2026fincac40,
-  title  = {FinCAC40 : un corpus réglementaire français (2010--2026) pour l'évaluation
-            de la robustesse temporelle des LLM en classification de durabilité},
-  author = {Dieng, Cheikh Ibra},
-  year   = {2026},
-  note   = {Preprint}
+  title        = {Regulatory Semantic Drift: When Preference-based Correction Fails Silently.
+                  {FINCAC40}, a Sixteen-year {AMF} Corpus (2010--2026) for Evaluating the
+                  Temporal Robustness of {LLMs} in {ESG} Classification},
+  author       = {Dieng, Cheikh Ibra},
+  year         = {2026},
+  howpublished = {SSRN preprint},
+  url          = {https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7438503}
 }
 ```
 
+GitHub's "Cite this repository" button reads [`CITATION.cff`](CITATION.cff).
+
 ## License
 
-Code released under Apache 2.0. The corpus derives from AMF filings published under the
-French **Licence Ouverte / Open Licence 2.0 (Etalab)** and is redistributed under the same terms.
+Code released under the [Apache License 2.0](LICENSE). The corpus derives from AMF filings
+published under the French **Licence Ouverte / Open Licence 2.0 (Etalab)** and is redistributed
+under the same terms.

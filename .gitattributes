@@ -1,0 +1,2 @@
+# Les prompts expérimentaux doivent rester identiques octet pour octet (tests/test_prompts.py)
+prompts/*.txt text eol=lf

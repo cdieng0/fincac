@@ -1,0 +1,53 @@
+{
+  "orpo_metrics": {
+    "n_examples": 140,
+    "accuracy": 0.16428571428571428,
+    "f1_macro": 0.23055956389289722,
+    "parse_failure_rate": 0.0
+  },
+  "orpo_fnr_by_epoch": {
+    "2010-2014": {
+      "n_relevant": 3,
+      "n_false_negative": 0,
+      "fnr": 0.0
+    },
+    "2015-2019": {
+      "n_relevant": 5,
+      "n_false_negative": 0,
+      "fnr": 0.0
+    },
+    "2020-2022": {
+      "n_relevant": 12,
+      "n_false_negative": 0,
+      "fnr": 0.0
+    },
+    "2023-2026": {
+      "n_relevant": 23,
+      "n_false_negative": 0,
+      "fnr": 0.0
+    }
+  },
+  "baseline_fnr_by_epoch": {
+    "2010-2014": {
+      "n_relevant": 3,
+      "n_false_negative": 2,
+      "fnr": 0.6666666666666666
+    },
+    "2015-2019": {
+      "n_relevant": 4,
+      "n_false_negative": 4,
+      "fnr": 1.0
+    },
+    "2020-2022": {
+      "n_relevant": 12,
+      "n_false_negative": 9,
+      "fnr": 0.75
+    },
+    "2023-2026": {
+      "n_relevant": 22,
+      "n_false_negative": 19,
+      "fnr": 0.8636363636363636
+    }
+  },
+  "baseline_model_key": "mistral-7b"
+}

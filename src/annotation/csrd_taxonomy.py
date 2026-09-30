@@ -1,5 +1,5 @@
 """
-csrd_taxonomy.py — Taxonomie ESRS/CSRD Partagée — FraFin-Reasoning
+csrd_taxonomy.py — Taxonomie ESRS/CSRD Partagée — FinCAC40
 ═══════════════════════════════════════════════════════════════════════════════════════
 Module fondation importé par :
     - export_gold_for_annotation.py  (génération du fichier Excel des 500 Gold)
@@ -42,16 +42,15 @@ Usage :
     from csrd_taxonomy import (
         CSRD_CATEGORIES, ESRS_SUBCATEGORIES, MATERIALITY_SCALE,
         MARKET_SURPRISE_LEVELS, TIME_HORIZONS,
-        validate_annotation, get_category_label, build_taxonomy_prompt_block,
+        validate_annotation, build_taxonomy_prompt_block,
     )
 
 Auto-test :
-    python csrd_taxonomy.py
+    python src/annotation/csrd_taxonomy.py
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -653,32 +652,6 @@ def validate_batch(annotations: list[dict[str, Any]]) -> dict[str, Any]:
 # HELPERS — accès pratique à la taxonomie
 # ═════════════════════════════════════════════════════════════════════════════
 
-def get_category_label(code: str, lang: str = "fr") -> str:
-    """Retourne le libellé humain d'un code catégorie."""
-    entry = CSRD_CATEGORIES.get(code)
-    if not entry:
-        return f"[Catégorie inconnue : {code}]"
-    return entry["label_fr"] if lang == "fr" else entry["label_en"]
-
-
-def get_subcategories(category_code: str) -> list[dict[str, str]]:
-    """Retourne la liste des sous-catégories valides pour une catégorie donnée."""
-    return ESRS_SUBCATEGORIES.get(category_code, [])
-
-
-def is_valid_category(code: str) -> bool:
-    return code in CSRD_CATEGORIES
-
-
-def is_valid_subcategory(category_code: str, subcode: str) -> bool:
-    valid = {s["code"] for s in ESRS_SUBCATEGORIES.get(category_code, [])}
-    return subcode in valid
-
-
-def list_all_category_codes() -> list[str]:
-    return list(CSRD_CATEGORIES.keys())
-
-
 def list_all_subcategory_codes() -> list[str]:
     """Tous les codes de sous-catégories, toutes catégories confondues (pour validation)."""
     codes = []
@@ -692,26 +665,6 @@ def get_pilier(category_code: str) -> str:
     entry = CSRD_CATEGORIES.get(category_code, {})
     return entry.get("pilier", "unknown")
 
-
-def empty_annotation_template() -> dict[str, Any]:
-    """Gabarit vide conforme au schéma — utile pour initialiser une ligne d'annotation."""
-    return {
-        "csrd_category":          None,
-        "esrs_subcategory":       None,
-        "materialite_score":      None,
-        "materialite_financiere": None,
-        "materialite_impact":     None,
-        "market_surprise":        None,
-        "horizon_temporel":       None,
-        "chain_of_thought":       "",
-        "confiance_annotation":   None,
-        "annotateur":             None,
-        "taxonomy_version":       CSRD_TAXONOMY_VERSION,
-    }
-
-# ═════════════════════════════════════════════════════════════════════════════
-# BLOC DE PROMPT — injecté dans annotation_mistral_mass.py
-# ═════════════════════════════════════════════════════════════════════════════
 
 def build_taxonomy_prompt_block() -> str:
     """
@@ -755,24 +708,6 @@ def build_taxonomy_prompt_block() -> str:
     return "\n".join(lines)
 
 
-def export_taxonomy_markdown() -> str:
-    """
-    Génère une table Markdown de la taxonomie complète — utilisable telle quelle
-    dans la Dataset Card HuggingFace ou en annexe du papier arXiv.
-    """
-    lines = [
-        f"# Taxonomie CSRD/ESRS — FraFin-Reasoning (v{CSRD_TAXONOMY_VERSION})",
-        f"\nRéférence : {CSRD_TAXONOMY_REFERENCE}\n",
-        "| Code | Pilier | Libellé (FR) | Sous-catégories |",
-        "|------|--------|--------------|------------------|",
-    ]
-    for code, info in CSRD_CATEGORIES.items():
-        n_sub = len(ESRS_SUBCATEGORIES.get(code, []))
-        lines.append(
-            f"| `{code}` | {info['pilier']} | {info['label_fr']} | {n_sub} |"
-        )
-    return "\n".join(lines)
-
 # ═════════════════════════════════════════════════════════════════════════════
 # AUTO-TEST — validation de cohérence interne au chargement du module
 # ═════════════════════════════════════════════════════════════════════════════
@@ -810,7 +745,7 @@ def _self_check() -> None:
     invalid_example = dict(valid_example)
     invalid_example["csrd_category"] = "none"
     # incohérent : materialite_score=4 mais category=none
-    ok2, errs2 = validate_annotation(invalid_example)
+    ok2, _ = validate_annotation(invalid_example)
     assert not ok2, "L'exemple incohérent (none + score 4) aurait dû échouer"
 
     print("  ✅ Auto-check de cohérence interne : OK")
@@ -835,10 +770,7 @@ if __name__ == "__main__":
     print(f"  Niveaux surprise marché: {list(MARKET_SURPRISE_LEVELS.keys())}")
     print(f"  Horizons temporels     : {list(TIME_HORIZONS.keys())}")
 
-    print(f"\n  Exemple — gabarit vide :")
-    print(f"  {json.dumps(empty_annotation_template(), indent=2, ensure_ascii=False)}")
-
-    print(f"\n  Aperçu du bloc de prompt généré pour Mistral :")
+    print("\n  Aperçu du bloc de prompt généré pour Mistral :")
     print("  " + "─" * 61)
     block = build_taxonomy_prompt_block()
     for line in block.split("\n")[:8]:

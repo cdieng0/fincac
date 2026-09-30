@@ -22,9 +22,9 @@ fichier soit :
 Aucun appel réseau. Aucune clé API requise. Coût : quelques secondes CPU.
 
 Usage :
-    python rebalance_existing_pairs.py --input orpo_pairs_20260823_194630.jsonl
-    python rebalance_existing_pairs.py --input checkpoint_orpo_candidates.json
-    python rebalance_existing_pairs.py --input orpo_pairs_XXX.jsonl --max-ratio-to-guardrail 4.0
+    python src/orpo/rebalance_existing_pairs.py --input orpo_pairs_20260823_194630.jsonl
+    python src/orpo/rebalance_existing_pairs.py --input checkpoint_orpo_candidates.json
+    python src/orpo/rebalance_existing_pairs.py --input orpo_pairs_XXX.jsonl --max-ratio-to-guardrail 4.0
 """
 
 from __future__ import annotations
@@ -48,12 +48,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-REQUIRED_PAIR_FIELDS = [
-    "paragraph_id", "epoch", "pair_type", "prompt",
-    "chosen", "rejected", "chosen_category", "rejected_category",
-    "chosen_model", "rejected_model",
-]
-
 # ═════════════════════════════════════════════════════════════════════════════
 # CHARGEMENT — accepte JSONL de paires OU checkpoint JSON brut
 # ═════════════════════════════════════════════════════════════════════════════
@@ -75,7 +69,7 @@ def load_pairs_any_format(path: Path) -> list[dict]:
                     if isinstance(rec, dict) and rec.get("status") == "pair"
                 ]
                 if pairs:
-                    logger.info(f"  Format détecté : checkpoint JSON brut")
+                    logger.info("  Format détecté : checkpoint JSON brut")
                     logger.info(f"  {len(ckpt)} candidats au total dans le checkpoint, "
                                 f"{len(pairs)} sont des paires exploitables")
                     return pairs
@@ -99,7 +93,7 @@ def load_pairs_any_format(path: Path) -> list[dict]:
             continue
         pairs.append(rec)
 
-    logger.info(f"  Format détecté : JSONL de paires")
+    logger.info("  Format détecté : JSONL de paires")
     logger.info(f"  {len(pairs)} paires chargées (lignes ignorées : {n_bad})")
     return pairs
 
@@ -138,7 +132,7 @@ def rebalance(
         logger.error("Aucune paire trouvée — vérifiez le fichier source.")
         sys.exit(1)
 
-    # [AJOUT] Sur-échantillonnage des types de garde-fou (B, C) — pas de nouvel
+    # Sur-échantillonnage des types de garde-fou (B, C) — pas de nouvel
     # appel API : simple duplication contrôlée. Motivation : avec seulement
     # 8 exemples B et 5 exemples C, même après plafonnement correct de A, un
     # batch effectif de 16 exemples a ~85% de chances de ne contenir AUCUN
@@ -157,7 +151,7 @@ def rebalance(
                 for copy_idx in range(guardrail_oversample):
                     for p in original:
                         dup = dict(p)
-                        # [FIX] paragraph_id distinct par copie -- sinon le split
+                        # paragraph_id distinct par copie -- sinon le split
                         # stratifié train/val de train_orpo_mistral7b.py pourrait
                         # placer la même paire des deux côtés (fuite locale).
                         dup["paragraph_id"] = f"{p['paragraph_id']}__dup{copy_idx}"
@@ -257,7 +251,7 @@ def save_stats(pairs: list[dict], source_path: Path, path: Path, args) -> None:
             "déséquilibre Type A / garde-fou extrême (ex: 300/8/5, soit 97% "
             "de Type A), causant un collapse du modèle entraîné vers la "
             "prédiction systématique de CSRD (FNR≈0 mais accuracy très basse "
-            "et FPR élevé). Voir INCIDENT_NOTE.md pour le diagnostic complet."
+            "et FPR élevé). Voir docs/INCIDENT_NOTE.md pour le diagnostic complet."
         ),
     }
     with open(path, "w", encoding="utf-8") as f:
@@ -321,13 +315,13 @@ def main():
     save_stats(balanced, input_path, out_stats, args)
 
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  TERMINÉ — Prochaine étape :")
-    logger.info(f"    python train_orpo_mistral7b.py --check-data-only \\")
+    logger.info("  TERMINÉ — Prochaine étape :")
+    logger.info("    python src/orpo/train_orpo_mistral7b.py --check-data-only \\")
     logger.info(f"        --pairs {out_jsonl}")
-    logger.info(f"  Puis, si le rapport de données est sain :")
-    logger.info(f"    python train_orpo_mistral7b.py --pairs {out_jsonl} --epochs 1")
-    logger.info(f"  (1 epoch de vérification d'abord — regardez rewards/accuracies")
-    logger.info(f"   dans les 10 premiers steps avant de lancer un run complet)")
+    logger.info("  Puis, si le rapport de données est sain :")
+    logger.info(f"    python src/orpo/train_orpo_mistral7b.py --pairs {out_jsonl} --epochs 1")
+    logger.info("  (1 epoch de vérification d'abord — regardez rewards/accuracies")
+    logger.info("   dans les 10 premiers steps avant de lancer un run complet)")
     logger.info(f"{'═'*65}")
 
 

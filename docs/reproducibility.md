@@ -1,142 +1,65 @@
-# Reproductibilité — FINCAC40
+# Reproducibility
 
-Guide pas-à-pas pour un chercheur externe.
+What can be checked, at what cost, and where each number of the paper comes from.
 
-## Prérequis
-
-- Python 3.10+ (testé avec 3.14 dans `.venv` local)
-- 16+ GB RAM pour le corpus ; GPU NVIDIA pour ORPO/probing
-- Clés API pour réévaluations LLM (Mistral, OpenAI, Anthropic)
-
-## 01 — Environnement
+## Setup
 
 ```bash
-git clone <URL_DU_DEPOT>
-cd finsent
-
+git clone https://github.com/cdieng0/fincac.git
+cd fincac
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux/macOS
-source .venv/bin/activate
-
-pip install -r requirements.txt
-cp .env.example .env
-# Éditer .env avec vos clés API
+source .venv/bin/activate                  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt            # CPU stages, tests, API clients
+pip install -r requirements-gpu.txt        # only for probing and ORPO (NVIDIA GPU)
+python src/publishing/fetch_gold_from_hf.py
+python -m pytest
 ```
 
-## 02 — Vérifier l'installation
+API keys are read from the environment (see [`.env.example`](../.env.example)); the scripts do
+not load a `.env` file themselves. Python 3.10 or later.
 
-```bash
-python test_prompt_consistency.py   # ne nécessite pas de clé API réelle
-python -m pytest tests/ -v          # tests de reproductibilité (counts, schémas)
-```
+## Four levels of reproduction
 
-## 03 — Acquérir les données
-
-### Option A — Hugging Face (recommandé pour Gold + corpus)
-
-```python
-from datasets import load_dataset
-corpus = load_dataset("CID99/FinCAC40", "corpus", split="train")
-gold = load_dataset("CID99/FinCAC40", "gold", split="test")
-```
-
-### Option B — Reconstruire depuis AMF
-
-1. Télécharger l'export depuis [info-financiere.gouv.fr](https://www.info-financiere.gouv.fr)
-2. Placer le fichier à la racine : `flux-amf-new-prod.csv`
-3. Vérifier SHA256 contre `data/run_meta_20260531_110531.json`
-
-## 04 — Construire le corpus
-
-```bash
-python main_amf.py
-# Attendu : 313 898 paragraphes (cf. run_meta JSON généré)
-```
-
-**Coût :** CPU intensif, plusieurs heures, téléchargement ~23k PDFs.
-
-## 05 — Vérifier le corpus
-
-```bash
-python -m pytest tests/test_corpus_counts.py -v
-```
-
-Attendu : `total_paragraphs == 313898`, colonnes requises présentes.
-
-## 06 — Gold Standard
-
-Le Gold 140 est archivé dans :
-
-- `data/gold_150_annotated_clean_reformulated_without.xlsx`
-- `hf_build/gold/test.parquet`
-
-```bash
-python -m pytest tests/test_gold_standard.py -v
-```
-
-## 07 — Évaluation LLM (Tier 3 — API)
-
-**Les prédictions archivées permettent de vérifier sans relancer les APIs.**
-
-```bash
-# Relancer (coûteux, ~$50–200 selon tarifs)
-python benchmark_temporal_drift.py --n-shot 0
-python benchmark_temporal_drift.py --n-shot 3
-
-# Vérifier depuis archive
-python metrics.py --csv data/results/predictions_shot0_20260817_095926.csv
-python metrics.py --csv data/results/predictions_shot3_20260818_103646.csv
-```
-
-## 08 — Linear probing
-
-**GAP connu :** le script de linear probing (Mistral-7B, 33 layers, L2 logistic regression C=0.1, 5-fold CV) n'est pas présent dans ce dépôt. Les résultats du papier ne peuvent pas être reproduits localement sans le script original.
-
-## 09 — ORPO (Tier 4 — GPU)
-
-### Vérifier depuis artefacts archivés (Run 2)
-
-```bash
-python 06_evaluate_orpo.py \
-  --adapter-dir outputs/mistral7b-orpo-csrd/final_adapter \
-  --gold data/gold_150_annotated_clean_reformulated_without.xlsx \
-  --baseline-csv data/results/predictions_shot3_20260818_103646.csv \
-  --out data/orpo/eval_report_orpo.json
-```
-
-### Reconstruire paires + entraîner (GPU A100 ~30 min)
-
-```bash
-python build_orpo_pairs.py --resume
-python rebalance_existing_pairs.py --input data/orpo/orpo_pairs_20260825_012910.jsonl
-python train_orpo_mistral7b.py --pairs data/orpo/orpo_pairs_rebalanced_20260827_105744.jsonl
-```
-
-## 10 — Figures et tables
-
-```bash
-python metrics.py --csv data/results/predictions_shot0_20260817_095926.csv
-# → data/results/latex_tables_*.tex, fnr_by_epoch_*.csv
-```
-
-## Seeds et paramètres globaux
-
-| Paramètre | Valeur | Fichier |
+| Level | What you do | Cost |
 |---|---|---|
-| `random_seed` | 42 | sampling, training, benchmark |
-| `bootstrap` (global) | 2000 | `metrics.py` |
-| `bootstrap` (par époque) | 500 | `metrics.py` |
-| `temperature` | 0.0 | `benchmark_temporal_drift.py` |
-| `orpo_beta` | 0.1 | `train_orpo_mistral7b.py` |
-| `lora_r` / `lora_alpha` | 16 / 32 | `train_orpo_mistral7b.py` |
+| 1. Check the archived artefacts | `python -m pytest` — recomputes the Run 2 report from its predictions and checks the probing and Run 1 artefacts against the paper | seconds, CPU |
+| 2. Recompute from predictions | `evaluate_orpo.py --from-predictions`, `compute_metrics.py`, `compute_missing_kappa.py` | seconds, CPU |
+| 3. Re-run model calls | benchmark, pair collection | API credits |
+| 4. Re-run from scratch | extraction, probing, ORPO training | hours, GPU |
 
-## Limitations de reproductibilité
+## Paper result → code → artefact
 
-1. **Modèles propriétaires** — GPT-4o, Claude, Mistral-Large peuvent évoluer côté provider.
-2. **Run 1 ORPO** — checkpoints non conservés ; métriques dans `MODEL_CARD.md` et `INCIDENT_NOTE.md`.
-3. **Linear probing** — script absent.
-4. **Annotation humaine** — protocole documenté, mais re-annotation produirait des labels différents.
+| Paper | Script | Archived artefact | Status |
+|---|---|---|---|
+| Table 1 — corpus volumes | `process_amf_extraction.py` | Hub corpus (313,608 rows) | Re-runnable; the AMF export changes over time |
+| Table 2 — eras, Gold counts | `publish_dataset_to_hf.py` (`epoch`) | Hub `gold` config | Checked by `tests/test_gold_standard.py` |
+| Stratified pool (14,974) | `build_annotation_sample_rigorous.py` | not archived | Re-runnable from the raw extraction or the Hub corpus |
+| Gold selection (140) | not in this repository | Hub `gold` config | See [data.md](data.md#how-the-140-were-selected) |
+| Table 3 — FNR by era, 4 models | `benchmark_temporal_drift.py`, `compute_metrics.py` | predictions not yet archived | Re-runnable with API keys |
+| Table 4 — base policy κ | `compute_missing_kappa.py` | predictions not yet archived | Re-runnable with API keys |
+| Section 4.2, Figure 2 — probing | `probe_temporal_signal.py` | [`data/results/probing/`](../data/results/probing/) | Checked by `tests/test_results.py`; re-runnable on GPU |
+| Table 4 — ORPO Run 1 | `train_orpo_mistral7b.py`, `evaluate_orpo.py` | [`data/results/orpo_run1/`](../data/results/orpo_run1/) (configuration, log, report) | Checked; pairs and predictions not preserved |
+| Table 4 — ORPO Run 2 | idem | [`data/results/orpo_run2/`](../data/results/orpo_run2/) + [model repo](https://huggingface.co/CID99/Mistral-7B-ORPO-CSRD) | Report recomputed from predictions by `tests/test_results.py` |
 
-Voir `docs/reproduction_matrix.md` pour le tableau complet.
+## Fixed parameters
+
+| Parameter | Value |
+|---|---|
+| Random seed | 42 everywhere |
+| Temperature | 0 |
+| Bootstrap | B = 2000 (global), 500 (per era) |
+| Few-shot | 3 examples taken from the Gold and removed from the test set ([prompts.md](prompts.md)) |
+| ORPO | β = 0.1, LoRA r = 16 / α = 32, QLoRA NF4, effective batch 16 |
+
+## Limits of reproduction
+
+- **Proprietary models change.** Temperature 0 and a fixed seed do not guarantee identical
+  answers from GPT-4o, Claude or Mistral-Large; the benchmark stores the model identifier each
+  call resolved to.
+- **Two sets of predictions are not yet archived here:** the four-model benchmark outputs
+  (zero-shot and 3-shot) and Run 1's per-example ORPO predictions. The first can be regenerated
+  with API keys; the second cannot.
+- **Human annotation is a judgement.** A second annotator would not reproduce every label;
+  no agreement measure exists yet.
+- **Known differences between the preprint and this repository** are listed in
+  [known_discrepancies.md](known_discrepancies.md).

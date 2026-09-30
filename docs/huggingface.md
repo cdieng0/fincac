@@ -1,61 +1,34 @@
-# Hugging Face — Ressources FINCAC40
+# Hugging Face resources
 
-## Séparation GitHub vs Hugging Face
-
-| Plateforme | Contenu |
+| Resource | Contents |
 |---|---|
-| **GitHub** | Code, protocoles, documentation, prompts, métadonnées, prédictions archivées, Gold Excel |
-| **Hugging Face** | Corpus parquet, Gold parquet, adapter ORPO, bundle modèle complet |
+| [CID99/FinCAC40](https://huggingface.co/datasets/CID99/FinCAC40) | Corpus (config `corpus`, 313,608 rows, ~88 MB) and Gold Standard (config `gold`, 140 rows). Etalab 2.0 |
+| [CID99/Mistral-7B-ORPO-CSRD](https://huggingface.co/CID99/Mistral-7B-ORPO-CSRD) | The Run 2 LoRA adapter, its tokenizer, preference pairs (`orpo_pairs.jsonl`), training log, evaluation report and per-example predictions. Apache 2.0. A research artefact, not a usable classifier |
+| [CID99/FinCAC40-collapse-demo](https://huggingface.co/spaces/CID99/FinCAC40-collapse-demo) | Gradio demo comparing the base model with the collapsed one; source in [`space/`](../space/) |
 
-## Dataset — `CID99/FinCAC40`
+## What lives where
 
-| Config | Split | Fichier local | Rows |
-|---|---|---|---|
-| `corpus` | train | `hf_build/corpus/train.parquet` | 313 898 |
-| `gold` | test | `hf_build/gold/test.parquet` | 140 |
+| GitHub (this repository) | Hugging Face |
+|---|---|
+| Code, tests, prompts, protocol, documentation | Corpus and Gold Standard |
+| Small run artefacts ([`data/results/`](../data/results/)) | Adapter weights and ORPO training files |
+| Source of the dataset and model cards ([`cards/`](../cards/)) | The published cards |
 
-```python
-from datasets import load_dataset
-corpus = load_dataset("CID99/FinCAC40", "corpus", split="train")
-gold = load_dataset("CID99/FinCAC40", "gold", split="test")
-```
+Large files never go into Git: the corpus, the AMF export (454 MB), model weights and
+checkpoints are excluded by [`.gitignore`](../.gitignore).
 
-**Licence :** Etalab 2.0  
-**Dataset card :** `hf_build/README.md` (copie de `README_en.md`)
+## Updating the Hub
 
-### Génération locale
+The cards on the Hub are copies. After editing a file in `cards/`, upload it again — either
+paste it into the card editor on the Hub, or:
 
 ```bash
-python publish_to_hf.py
+huggingface-cli login
+huggingface-cli upload CID99/FinCAC40 cards/dataset_card.md README.md --repo-type dataset
+huggingface-cli upload CID99/Mistral-7B-ORPO-CSRD cards/model_card.md README.md
+huggingface-cli upload CID99/Mistral-7B-ORPO-CSRD prompts/system_prompt_3shot.txt prompt_template.txt
 ```
 
-## Modèle ORPO — `CID99/Mistral-7B-ORPO-CSRD`
-
-Artefact de recherche documentant un **échec d'alignement** (Run 2).
-
-| Fichier local | Rôle |
-|---|---|
-| `hf_model_build/adapter_model.safetensors` | LoRA adapter |
-| `hf_model_build/prompt_template.txt` | Prompt d'évaluation exact |
-| `hf_model_build/orpo_pairs.jsonl` | Paires d'entraînement |
-| `hf_model_build/training_log.json` | Télémétrie entraînement |
-| `hf_model_build/eval_predictions.csv` | Prédictions Gold 140 |
-| `hf_model_build/eval_report.json` | Métriques complètes |
-
-**Licence :** Apache 2.0 (adapter)  
-**Model card :** `MODEL_CARD.md`
-
-### Génération locale
-
-```bash
-python publish_model_to_hf.py
-```
-
-## Space démo
-
-`CID99/FinCAC40-collapse-demo` — comparaison base vs ORPO (`app.py`)
-
-## Limitations HF
-
-- Le corpus publié peut contaminer les évaluations futures (cf. avertissement dataset card).
-- Le modèle ORPO ne doit **pas** être déployé en production.
+The last line replaces the model repository's `prompt_template.txt`, a condensed version, with
+the exact prompt used in training and evaluation. Full republication of the data or the model
+is described in [PIPELINE.md](PIPELINE.md#10-publication).

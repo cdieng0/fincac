@@ -1,0 +1,8 @@
+# FinCAC40 — probing and ORPO training/evaluation (NVIDIA GPU; Colab or A100 used for the paper)
+-r requirements.txt
+torch>=2.1
+transformers>=4.44
+trl>=0.9,<0.13            # ORPOTrainer API used by train_orpo_mistral7b.py
+peft>=0.12
+bitsandbytes>=0.43        # 4-bit NF4 quantization
+accelerate>=0.33

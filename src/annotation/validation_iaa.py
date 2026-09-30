@@ -1,7 +1,7 @@
 """
 validation_iaa.py — Accord Inter-Annotateurs (Kappa de Cohen) Humain vs Mistral
 ═══════════════════════════════════════════════════════════════════════════════════════
-Phase 3c du pipeline FraFin-Reasoning — dernière étape avant fusion finale du dataset.
+Phase 3c du pipeline FinCAC40 — dernière étape avant fusion finale du dataset.
 
 RÔLE DANS LE PIPELINE :
     frafin_gold_500_{TS}.xlsx                 (500 annotés à la main, Phase 3a)
@@ -49,10 +49,10 @@ Dépendances :
     pip install pandas numpy scikit-learn pyarrow openpyxl
 
 Usage :
-    python validation_iaa.py
-    python validation_iaa.py --gold data/frafin_gold_500_XXX.xlsx \\
+    python src/annotation/validation_iaa.py
+    python src/annotation/validation_iaa.py --gold data/frafin_gold_500_XXX.xlsx \\
                               --mistral-iaa data/iaa_mistral_annotations_XXX.parquet
-    python validation_iaa.py --bootstrap-n 5000
+    python src/annotation/validation_iaa.py --bootstrap-n 5000
 """
 
 from __future__ import annotations
@@ -68,6 +68,12 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import cohen_kappa_score
 
+# Rend le paquet `src` importable quand le script est lancé par son chemin
+# depuis la racine du dépôt : python src/<module>/<script>.py
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 try:
     from src.annotation.csrd_taxonomy import (
         CSRD_CATEGORIES,
@@ -78,8 +84,8 @@ try:
     )
 except ImportError:
     print(
-        "❌ csrd_taxonomy.py introuvable.\n"
-        "   Placez csrd_taxonomy.py dans le même dossier que ce script."
+        "❌ Impossible d'importer src/annotation/csrd_taxonomy.py.\n"
+        "   Lancez ce script depuis la racine du dépôt (python src/annotation/<script>.py)."
     )
     sys.exit(1)
 
@@ -112,7 +118,7 @@ FIELDS_TO_COMPARE = [
 # CHEMINS
 # ═════════════════════════════════════════════════════════════════════════════
 
-ROOT_DIR = Path(__file__).parent
+ROOT_DIR = Path(__file__).resolve().parents[2]  # racine du dépôt
 DATA_DIR = ROOT_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 RUN_TS   = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -533,7 +539,7 @@ def export_disagreements(merged: pd.DataFrame, path: Path) -> int:
 
 def log_kappa_table(kappas: dict) -> None:
     logger.info(f"\n{'═'*82}")
-    logger.info(f"  RÉSULTATS — ACCORD INTER-ANNOTATEURS (Kappa de Cohen, humain vs Mistral)")
+    logger.info("  RÉSULTATS — ACCORD INTER-ANNOTATEURS (Kappa de Cohen, humain vs Mistral)")
     logger.info(f"{'═'*82}")
     logger.info(f"  {'Variable':<42} {'n':>5} {'κ':>7} {'IC95%':>16}  Interprétation")
     logger.info(f"  {'-'*80}")
@@ -622,7 +628,7 @@ def save_report(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="FraFin-Reasoning — Validation IAA (Kappa de Cohen), Phase 3c"
+        description="FinCAC40 — Validation IAA (Kappa de Cohen), Phase 3c"
     )
     p.add_argument("--gold",         default="auto", help="frafin_gold_500_*.xlsx")
     p.add_argument("--mistral-iaa",  default="auto", help="iaa_mistral_annotations_*.parquet")
@@ -639,7 +645,7 @@ def main():
     MIN_PAIRS_WARNING = args.min_pairs_warning
 
     logger.info("═" * 65)
-    logger.info("  FraFin-Reasoning — Validation IAA (Phase 3c)")
+    logger.info("  FinCAC40 — Validation IAA (Phase 3c)")
     logger.info(f"  Bootstrap : {BOOTSTRAP_N} ré-échantillonnages, seed={BOOTSTRAP_SEED}")
     logger.info("═" * 65)
 
@@ -684,11 +690,11 @@ def main():
     save_report(kappas, n_pairs, n_total_iaa, missing_in_mistral, missing_in_human, n_disagree)
 
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  TERMINÉ")
+    logger.info("  TERMINÉ")
     logger.info(f"{'═'*65}")
     logger.info(
-        f"  ⚙  Prochaine étape : fusion GOLD (humain, 500) + mass (Mistral, "
-        f"~14 500) en frafin_reasoning_final.parquet, puis push_to_hub()."
+        "  ⚙  Prochaine étape : fusion GOLD (humain, 500) + mass (Mistral, "
+        "~14 500) en frafin_reasoning_final.parquet, puis push_to_hub()."
     )
     logger.info("═" * 65)
 

@@ -1,5 +1,5 @@
 """
-process_amf_extraction_v4_1.py — Pipeline AMF FraFin-Reasoning (Optimisé Ressources)
+process_amf_extraction.py — Pipeline AMF FinCAC40 (Optimisé Ressources)
 ═══════════════════════════════════════════════════════════════════════════════════════
 Corrections des crashes et surchauffe identifiés sur le run v4 :
 
@@ -12,9 +12,9 @@ Corrections des crashes et surchauffe identifiés sur le run v4 :
   [CPU-02] Pause BATCH_COOLDOWN entre batches → CPU peut refroidir
 
 Usage :
-    python process_amf_extraction_v4_1.py
-    python process_amf_extraction_v4_1.py --workers 3 --batch 30 --min-words 15
-    python process_amf_extraction_v4_1.py --resume   # reprend après un crash
+    python src/extraction/process_amf_extraction.py
+    python src/extraction/process_amf_extraction.py --workers 3 --batch 30 --min-words 15
+    python src/extraction/process_amf_extraction.py --resume   # reprend après un crash
 """
 
 import argparse
@@ -92,7 +92,7 @@ HTTP_RETRY_CODES = {429, 500, 502, 503, 504}
 # CHEMINS
 # ═════════════════════════════════════════════════════════════════════════════
 
-ROOT_DIR    = Path(__file__).parent
+ROOT_DIR = Path(__file__).resolve().parents[2]  # racine du dépôt
 DATA_DIR    = ROOT_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
@@ -236,7 +236,7 @@ def make_session() -> requests.Session:
     )
     s.mount("https://", adapter)
     s.mount("http://",  adapter)
-    s.headers["User-Agent"] = "FraFin-Dataset-Bot/4.1 (Academic Research, ENSAE Paris)"
+    s.headers["User-Agent"] = "FinCAC40-Dataset-Bot/4.1 (Academic Research, ENSAE Paris)"
     return s
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -486,7 +486,7 @@ def detect_columns(df: pd.DataFrame) -> dict:
         "isin":     find("isin"),
         "date":     find("date_envoi_amf", "date_de_ti", "date_tit", "date_dep"),
         "titre":    find("titre_du_fichier", "titre", "title"),
-        # [FIX-02] Sous-type en priorité (52 656 valeurs vs 1 957)
+        # Sous-type en priorité (52 656 valeurs vs 1 957)
         "type_doc": find("sous-type_d", "sous_type_d",
                          "type_d_information_nouveau",
                          "type_d_information_ancien"),
@@ -790,17 +790,17 @@ def save_run_meta(source_path, source_hash, df_filtered, mapping, stats):
 
 def log_final_report(stats):
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  RAPPORT FINAL v4.1")
+    logger.info("  RAPPORT FINAL v4.1")
     logger.info(f"{'═'*65}")
     logger.info(f"  Documents OK        : {stats['total_docs_ok']:>10,}")
     logger.info(f"  Documents en échec  : {stats['total_docs_fail']:>10,}")
     logger.info(f"  Taux de couverture  : {stats['coverage_rate_pct']:>9.2f}%")
     logger.info(f"  Paragraphes bruts   : {stats['total_paragraphs']:>10,}")
     logger.info(f"  CSV                 : {CSV_OUT}")
-    logger.info(f"\n  Détail des échecs :")
+    logger.info("\n  Détail des échecs :")
     for err, n in sorted(stats["error_breakdown"].items(), key=lambda x: -x[1]):
         logger.info(f"    {err:<45} {n:>6,}")
-    logger.info(f"\n  ⚙  Prochaine étape : build_annotation_sample.py (Phase 2)")
+    logger.info("\n  ⚙  Prochaine étape : build_annotation_sample.py (Phase 2)")
     logger.info(f"{'═'*65}")
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -810,10 +810,10 @@ def log_final_report(stats):
 _done_urls_ref: set[str] = set()
 
 def _sigint_handler(sig, frame):
-    logger.warning(f"\n⚡ CTRL+C — Sauvegarde checkpoint...")
+    logger.warning("\n⚡ CTRL+C — Sauvegarde checkpoint...")
     save_checkpoint(_done_urls_ref)
     logger.warning(f"   CSV partiel : {CSV_OUT}")
-    logger.warning(f"   Relancez avec --resume pour continuer.")
+    logger.warning("   Relancez avec --resume pour continuer.")
     sys.exit(0)
 
 signal.signal(signal.SIGINT, _sigint_handler)
@@ -823,7 +823,7 @@ signal.signal(signal.SIGINT, _sigint_handler)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def parse_args():
-    p = argparse.ArgumentParser(description="FraFin-Reasoning AMF Pipeline v4.1")
+    p = argparse.ArgumentParser(description="FinCAC40 AMF Pipeline v4.1")
     p.add_argument("--input",     default=EXPORT_FILE)
     p.add_argument("--workers",   type=int,   default=MAX_WORKERS,
                    help=f"Workers parallèles (défaut {MAX_WORKERS}, max recommandé 4)")
@@ -850,7 +850,7 @@ def main():
     MAX_WORDS_PER_PARAGRAPH = args.max_words
 
     logger.info("═" * 65)
-    logger.info("  FraFin-Reasoning — AMF Pipeline v4.1 (Optimisé Ressources)")
+    logger.info("  FinCAC40 — AMF Pipeline v4.1 (Optimisé Ressources)")
     logger.info(f"  Workers : {MAX_WORKERS} | Batch : {BATCH_SIZE} "
                 f"| Cooldown : {BATCH_COOLDOWN}s | PDF max : {MAX_PDF_PAGES}p/{MAX_PDF_MB}Mo")
     logger.info(f"  Paragraphes : {MIN_WORDS_PER_PARAGRAPH}–{MAX_WORDS_PER_PARAGRAPH} mots")
@@ -867,7 +867,7 @@ def main():
 
     # Chargement source
     df, source_path = load_and_analyze(args.input)
-    logger.info(f"\n  Hash SHA256 source...")
+    logger.info("\n  Hash SHA256 source...")
     source_hash = compute_file_hash(source_path)
     logger.info(f"  {source_hash}")
 
@@ -902,7 +902,7 @@ def main():
 
         stats = process_and_save(df_filtered, mapping, done_urls, f, writer)
 
-    logger.info(f"\n  [5/5] Export Parquet...")
+    logger.info("\n  [5/5] Export Parquet...")
     export_parquet(csv_target)
 
     save_run_meta(source_path, source_hash, df_filtered, mapping, stats)

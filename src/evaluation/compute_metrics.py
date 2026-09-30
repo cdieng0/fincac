@@ -1,5 +1,5 @@
 """
-compute_metrics_from_csv.py — Métriques Complètes pour le Papier FraFin-Temporal-Drift
+compute_metrics.py — Métriques Complètes pour le Papier FinCAC40
 ════════════════════════════════════════════════════════════════════════════════════════
 Calcule l'ensemble des métriques depuis le CSV de prédictions produit par
 benchmark_temporal_drift.py. Aucun appel API. Pas de colonne de confiance requise.
@@ -64,8 +64,8 @@ FICHIERS DE SORTIE :
   data/results/fnr_by_epoch_{TS}.csv                   ← données Figure 2 du papier
 
 Usage :
-    python compute_metrics_from_csv.py --csv data/results/predictions_shot0_20260817_095926.csv
-    python compute_metrics_from_csv.py --csv data/results/predictions_shot0_20260817_095926.csv --n-boot 5000
+    python src/evaluation/compute_metrics.py --csv data/results/predictions_shot0_20260817_095926.csv
+    python src/evaluation/compute_metrics.py --csv data/results/predictions_shot0_20260817_095926.csv --n-boot 5000
 """
 
 import argparse
@@ -246,7 +246,6 @@ def compute_model_metrics(df_m: pd.DataFrame) -> dict:
     y_pred_bin  = df["pred_is_csrd"].values
     y_gold_cat  = df["gold_label"].values
     y_pred_cat  = df["pred_category"].values
-    correct_bin = (y_gold_bin == y_pred_bin)
 
     # ── A. Performance globale ─────────────────────────────────────────────
 
@@ -723,10 +722,10 @@ def latex_table_kappa_epoch(all_metrics: dict, model_list: list[str]) -> str:
 
 def print_console_report(all_metrics: dict, mcnemar: dict, model_list: list[str]) -> None:
     logger.info(f"\n{'═'*76}")
-    logger.info("  RÉSULTATS — FraFin Temporal Drift Benchmark")
+    logger.info("  RÉSULTATS — FinCAC40 Temporal Drift Benchmark")
     logger.info(f"{'═'*76}")
 
-    logger.info(f"\n  TABLE 1 — Performance globale\n")
+    logger.info("\n  TABLE 1 — Performance globale\n")
     hdr = f"  {'Modèle':<22}{'n':>5}{'Acc':>7}{'F1-bin':>8}{'κ-bin':>8}{'κ-mc':>7}{'MacroF1':>9}{'Err':>5}"
     logger.info(hdr)
     logger.info("  " + "─" * 68)
@@ -739,7 +738,7 @@ def print_console_report(all_metrics: dict, mcnemar: dict, model_list: list[str]
             f"{_f(m['f1_macro_rich']):>9}{m['n_errors']:>5}"
         )
 
-    logger.info(f"\n  TABLE 2 — F1 binaire par époque (dérive temporelle)\n")
+    logger.info("\n  TABLE 2 — F1 binaire par époque (dérive temporelle)\n")
     hdr2 = f"  {'Modèle':<22}" + "".join(f"{ep:>12}" for ep in EPOCH_ORDER) + f"{'TD':>7}{'β':>8}{'ρ_S':>7}"
     logger.info(hdr2)
     logger.info("  " + "─" * 76)
@@ -751,7 +750,7 @@ def print_console_report(all_metrics: dict, mcnemar: dict, model_list: list[str]
         row += f"{_f(m['temporal_drift_td']):>7}{_f(m['beta_drift'],4):>8}{_f(m['spearman_rho']):>7}"
         logger.info(row)
 
-    logger.info(f"\n  TABLE 3 — FNR par époque (test direct de H1)\n")
+    logger.info("\n  TABLE 3 — FNR par époque (test direct de H1)\n")
     hdr3 = f"  {'Modèle':<22}" + "".join(f"{ep:>12}" for ep in EPOCH_ORDER) + f"{'FNR_Δ':>8}"
     logger.info(hdr3)
     logger.info("  " + "─" * 68)
@@ -763,7 +762,7 @@ def print_console_report(all_metrics: dict, mcnemar: dict, model_list: list[str]
         row += f"{_f(m['fnr_drift']):>8}"
         logger.info(row)
 
-    logger.info(f"\n  VÉRIFICATION H1 (biais de récence temporelle) :\n")
+    logger.info("\n  VÉRIFICATION H1 (biais de récence temporelle) :\n")
     for mk in model_list:
         m  = all_metrics[mk]
         td = m.get("temporal_drift_td")
@@ -775,7 +774,7 @@ def print_console_report(all_metrics: dict, mcnemar: dict, model_list: list[str]
                 f"  {mk:<22} TD={td:+.3f}  ρ_S={_f(rho)}  FNR_Δ={_f(fnr_d)}  {drift_status}"
             )
 
-    logger.info(f"\n  TABLE 4 — McNemar (significativité des différences) :\n")
+    logger.info("\n  TABLE 4 — McNemar (significativité des différences) :\n")
     for key, entry in mcnemar.items():
         parts = key.split("_vs_")
         logger.info(
@@ -816,7 +815,7 @@ def save_all_outputs(
     # LaTeX
     tex_path = out_dir / f"latex_tables_{ts}.tex"
     tex_content = "\n\n".join([
-        f"% FraFin Temporal Drift — Tables LaTeX",
+        "% FinCAC40 Temporal Drift — Tables LaTeX",
         f"% Source : {csv_path.name}  |  {ts}",
         f"% Modèles : {', '.join(model_list)}",
         f"% Bootstrap : {N_BOOT_GLOBAL} (global), {N_BOOT_EPOCH} (epoch)",
@@ -854,7 +853,7 @@ def save_all_outputs(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="FraFin — Métriques complètes depuis le CSV de prédictions"
+        description="FinCAC40 — Métriques complètes depuis le CSV de prédictions"
     )
     p.add_argument("--csv", required=True,
                    help="data/results/predictions_shot0_20260817_095926.csv")
@@ -884,7 +883,7 @@ def main():
         logger.warning(f"CSV non trouvé → auto-détecté : {csv_path.name}")
 
     logger.info("═" * 65)
-    logger.info("  FraFin — Calcul des métriques (sans confiance)")
+    logger.info("  FinCAC40 — Calcul des métriques (sans confiance)")
     logger.info(f"  CSV    : {csv_path.name}")
     logger.info(f"  Bootstrap : {N_BOOT_GLOBAL} (global) / {N_BOOT_EPOCH} (epoch)")
     logger.info("═" * 65)

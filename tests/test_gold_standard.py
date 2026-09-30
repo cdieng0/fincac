@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 GOLD_XLSX = Path("data/gold_150_annotated_clean_reformulated_without.xlsx")
-GOLD_PARQUET = Path("hf_build/gold/test.parquet")
+GOLD_PARQUET = Path("hf_build/gold/test.parquet")  # sortie locale de publish_dataset_to_hf.py
 
 EXPECTED_GOLD_SIZE = 140
 VALID_CATEGORIES = {
@@ -20,7 +20,7 @@ def _load_gold():
         return pd.read_excel(GOLD_XLSX)
     if GOLD_PARQUET.exists():
         return pd.read_parquet(GOLD_PARQUET)
-    pytest.skip("Aucun fichier Gold Standard trouvé")
+    pytest.skip("Gold Standard absent : lancez python src/publishing/fetch_gold_from_hf.py")
 
 
 def test_gold_size():
@@ -39,6 +39,7 @@ def test_gold_categories_valid():
 
 def test_gold_epoch_coverage():
     df = _load_gold()
-    if "epoch" not in df.columns:
-        pytest.skip("Colonne epoch absente")
-    assert len(df["epoch"].unique()) == 4
+    col = next((c for c in ("epoch", "Période") if c in df.columns), None)
+    if col is None:
+        pytest.skip("Colonne d'époque absente")
+    assert len(df[col].unique()) == 4

@@ -1,7 +1,7 @@
 """
 export_gold_for_annotation.py — Export Excel des 500 Paragraphes GOLD
 ═══════════════════════════════════════════════════════════════════════════════════════
-Phase 3a du pipeline FraFin-Reasoning.
+Phase 3a du pipeline FinCAC40.
 
 RÔLE DANS LE PIPELINE :
     frafin_sample_rigorous_{TS}.parquet  (15 000, Phase 2)
@@ -53,11 +53,10 @@ Dépendances :
     pip install pandas openpyxl pyarrow
 
 Usage :
-    python export_gold_for_annotation.py
-    python export_gold_for_annotation.py --input data/frafin_sample_rigorous_XXX.parquet
-    python export_gold_for_annotation.py --n-gold 500 --n-iaa 200 --seed 42
+    python src/annotation/export_gold_for_annotation.py
+    python src/annotation/export_gold_for_annotation.py --input data/frafin_sample_rigorous_XXX.parquet
+    python src/annotation/export_gold_for_annotation.py --n-gold 500 --n-iaa 200 --seed 42
 """
-
 
 from __future__ import annotations
 
@@ -77,6 +76,12 @@ from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.workbook.defined_name import DefinedName
+
+# Rend le paquet `src` importable quand le script est lancé par son chemin
+# depuis la racine du dépôt : python src/<module>/<script>.py
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 try:
     from src.annotation.csrd_taxonomy import (
@@ -108,8 +113,8 @@ CSRD_QUARTILE_ORDER = ["q0_low", "q1_med_low", "q2_med_high", "q3_high"]
 # CHEMINS
 # ═════════════════════════════════════════════════════════════════════════════
 
-ROOT_DIR  = Path(__file__).parent
-DATA_DIR  = ROOT_DIR / "data"
+ROOT_DIR = Path(__file__).resolve().parents[2]  # racine du dépôt
+DATA_DIR = ROOT_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 RUN_TS   = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -134,13 +139,37 @@ def load_pool(filepath: str) -> pd.DataFrame:
         if not candidates:
             candidates = sorted(DATA_DIR.glob("frafin_sample_rigorous_*.csv"), reverse=True)
         if not candidates:
+            # [DIAGNOSTIC] Liste tout ce qui existe réellement dans data/ pour
+            # comprendre immédiatement ce qui s'est mal passé, plutôt que de
+            # planter sur une erreur muette.
+            all_frafin_files = sorted(DATA_DIR.glob("frafin_*"))
             logger.error(
-                "Aucun fichier frafin_sample_rigorous_*.parquet trouvé dans data/. "
-                "Lancez d'abord build_annotation_sample_rigorous.py (Phase 2)."
+                "Aucun fichier 'frafin_sample_rigorous_*.parquet|csv' trouvé dans "
+                f"{DATA_DIR.resolve()}"
             )
+            if all_frafin_files:
+                logger.error("  Fichiers frafin_* présents dans data/ :")
+                for f in all_frafin_files:
+                    logger.error(f"    - {f.name}")
+                if any(f.name.startswith("frafin_raw_") for f in all_frafin_files):
+                    logger.error(
+                        "  → Vous avez un fichier 'frafin_raw_*' (sortie Phase 1, "
+                        "extraction brute) mais pas encore de "
+                        "'frafin_sample_rigorous_*' (sortie Phase 2, après "
+                        "stratification). Lancez d'abord :\n"
+                        "      python src/sampling/build_annotation_sample_rigorous.py\n"
+                        "  puis relancez ce script."
+                    )
+            else:
+                logger.error(f"  Aucun fichier frafin_* du tout dans {DATA_DIR.resolve()}.")
             sys.exit(1)
         path = candidates[0]
         logger.info(f"Auto-détection : {path.name}")
+
+    # [DIAGNOSTIC] Chemin absolu explicite — élimine toute ambiguïté sur le
+    # fichier réellement chargé (utile si plusieurs scripts/dossiers data/
+    # coexistent, ou si --input a été passé explicitement).
+    logger.info(f"  Chemin complet : {path.resolve()}")
 
     df = pd.read_parquet(path) if path.suffix == ".parquet" else \
          pd.read_csv(path, dtype=str, low_memory=False)
@@ -149,9 +178,20 @@ def load_pool(filepath: str) -> pd.DataFrame:
     missing  = required - set(df.columns)
     if missing:
         logger.error(
-            f"Colonnes requises manquantes : {missing}. "
-            f"Ce script attend la sortie de build_annotation_sample_rigorous.py."
+            f"Colonnes requises manquantes : {missing}\n"
+            f"  Fichier chargé    : {path.resolve()}\n"
+            f"  Colonnes trouvées : {sorted(df.columns.tolist())}\n"
+            f"  Ce script attend la sortie de build_annotation_sample_rigorous.py "
+            f"(Phase 2), pas celle de process_amf_extraction.py (Phase 1)."
         )
+        if "doc_type" in df.columns and "year_bucket" not in df.columns:
+            logger.error(
+                "  → Ce fichier ressemble à une sortie Phase 1 brute "
+                "('frafin_raw_*'). Lancez build_annotation_sample_rigorous.py "
+                "dessus d'abord, puis relancez ce script sans --input pour "
+                "l'auto-détection, ou avec --input pointant vers le "
+                "'frafin_sample_rigorous_*.parquet' obtenu."
+            )
         sys.exit(1)
 
     logger.info(f"Pool chargé : {len(df):,} paragraphes  ({path.name})")
@@ -283,7 +323,7 @@ def select_gold(
     gold_df = gold_df.sample(frac=1, random_state=seed).reset_index(drop=True)
 
     logger.info(f"\n  Total GOLD sélectionné : {len(gold_df):,}")
-    logger.info(f"\n  Distribution year_bucket × csrd_quartile :")
+    logger.info("\n  Distribution year_bucket × csrd_quartile :")
     pivot = pd.crosstab(gold_df["year_bucket"], gold_df["csrd_quartile"])
     pivot = pivot.reindex(index=YEAR_BUCKETS_ORDER, columns=CSRD_QUARTILE_ORDER, fill_value=0)
     logger.info(f"\n{pivot.to_string()}")
@@ -321,7 +361,7 @@ def select_iaa_subset(
 
     n_marked = int(gold_df["iaa_subset"].sum())
     logger.info(f"  Paragraphes marqués IAA : {n_marked} / {len(gold_df)}")
-    logger.info(f"  (seront ré-annotés indépendamment par Mistral pour le Kappa de Cohen)")
+    logger.info("  (seront ré-annotés indépendamment par Mistral pour le Kappa de Cohen)")
 
     return gold_df, quotas
 
@@ -361,7 +401,7 @@ def build_instructions_sheet(wb: Workbook, n_gold: int, n_iaa: int) -> None:
     ws.sheet_view.showGridLines = False
 
     lines = [
-        ("FraFin-Reasoning — Annotation Gold Standard (Hold-out Test Set)", True, 14),
+        ("FinCAC40 — Annotation Gold Standard (Hold-out Test Set)", True, 14),
         ("", False, 10),
         (f"Ce classeur contient {n_gold} paragraphes issus du corpus réglementaire AMF "
          f"(CAC 40, 2010–2026), sélectionnés par échantillonnage stratifié proportionnel "
@@ -836,7 +876,7 @@ def save_report(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="FraFin-Reasoning — Export Excel des 500 Gold pour annotation humaine"
+        description="FinCAC40 — Export Excel des 500 Gold pour annotation humaine"
     )
     p.add_argument("--input", default="auto")
     p.add_argument("--n-gold", type=int, default=N_GOLD)
@@ -858,7 +898,7 @@ def main():
     MIN_PER_STRATUM_IAA  = args.min_per_stratum_iaa
 
     logger.info("═" * 65)
-    logger.info("  FraFin-Reasoning — Export Gold Standard (Phase 3a)")
+    logger.info("  FinCAC40 — Export Gold Standard (Phase 3a)")
     logger.info(f"  GOLD : {N_GOLD}  |  IAA : {N_IAA}  |  Seed : {RANDOM_SEED}")
     logger.info("═" * 65)
 
@@ -869,13 +909,13 @@ def main():
     gold_df, iaa_quotas  = select_iaa_subset(gold_df, N_IAA, MIN_PER_STRATUM_IAA, RANDOM_SEED)
 
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  CONSTRUCTION DU CLASSEUR EXCEL")
+    logger.info("  CONSTRUCTION DU CLASSEUR EXCEL")
     logger.info(f"{'═'*65}")
 
     wb = Workbook()
     wb.remove(wb.active)   # supprime la feuille vide par défaut
-    wb.properties.title   = "FraFin-Reasoning — Gold Standard Annotation"
-    wb.properties.creator = "FraFin-Reasoning Project (ENSAE)"
+    wb.properties.title   = "FinCAC40 — Gold Standard Annotation"
+    wb.properties.creator = "FinCAC40 Project (ENSAE)"
 
     build_instructions_sheet(wb, N_GOLD, N_IAA)
     build_taxonomy_sheet(wb)
@@ -894,10 +934,10 @@ def main():
     save_report(pool_size, gold_df, gold_quotas, iaa_quotas)
 
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  TERMINÉ")
+    logger.info("  TERMINÉ")
     logger.info(f"{'═'*65}")
     logger.info(f"  Ouvrez {OUT_XLSX.name} et complétez l'onglet 'Annotation'.")
-    logger.info(f"  ⚙  Prochaine étape : annotation_mistral_mass.py")
+    logger.info("  ⚙  Prochaine étape : annotation_mistral_mass.py")
     logger.info("═" * 65)
 
 

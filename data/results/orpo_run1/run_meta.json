@@ -1,0 +1,41 @@
+{
+  "run_timestamp": "20260826_092316",
+  "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
+  "method": "ORPO (Odds Ratio Preference Optimization)",
+  "reference": "Hong et al., 2024 — arXiv:2403.07691",
+  "quantization": "4-bit NF4, double quant, compute dtype bfloat16",
+  "lora_config": {
+    "r": 16,
+    "alpha": 32,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ]
+  },
+  "orpo_beta": 0.1,
+  "num_epochs": 3,
+  "learning_rate": 5e-05,
+  "effective_batch_size": 16,
+  "max_length": 3072,
+  "max_prompt_length": 2816,
+  "random_seed": 42,
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "n_train_pairs": 273,
+  "n_val_pairs": 42,
+  "final_train_metrics": {
+    "train_runtime": 2950.9618,
+    "train_samples_per_second": 0.278,
+    "train_steps_per_second": 0.017,
+    "total_flos": 0.0,
+    "train_loss": 0.36730409048351587,
+    "epoch": 2.989010989010989
+  },
+  "prompt_format": "Manual Mistral instruction template '<s>[INST] {system}\\n\\n{user} [/INST]' — NOT tokenizer.apply_chat_template(), cf. module docstring for rationale.",
+  "gold_140_excluded": "Verified via build_orpo_pairs.py exclusion + optional --gold-safety-check"
+}

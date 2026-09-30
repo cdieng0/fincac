@@ -1,0 +1,20 @@
+# ─────────────────────────────────────────────────────────────────────
+# Mode HORS-LIGNE (CPU basic, gratuit) — configuration par défaut.
+# L'app affiche les prédictions réelles enregistrées lors de l'évaluation.
+# Démarrage en ~1 minute.
+# ─────────────────────────────────────────────────────────────────────
+gradio>=4.44
+pandas>=2.0
+
+# ─────────────────────────────────────────────────────────────────────
+# Mode LIVE (nécessite un GPU : ZeroGPU ou T4).
+# Décommentez les lignes ci-dessous ET changez le hardware du Space dans
+# Settings. L'utilisateur pourra alors soumettre n'importe quel texte et
+# les deux modèles répondront en direct.
+# Attention : le build passe de ~1 min à ~10 min (torch pèse 2 Go).
+# ─────────────────────────────────────────────────────────────────────
+# torch>=2.1
+# transformers>=4.44
+# peft>=0.12
+# bitsandbytes>=0.43
+# accelerate>=0.33

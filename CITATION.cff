@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this code or the FinCAC40 corpus, please cite the preprint below."
+title: "FinCAC40: code for evaluating the temporal robustness of LLMs on French regulatory filings"
+type: software
+authors:
+  - family-names: Dieng
+    given-names: Cheikh Ibra
+    affiliation: "ENSAE Paris, Institut Polytechnique de Paris"
+repository-code: "https://github.com/cdieng0/fincac"
+url: "https://huggingface.co/datasets/CID99/FinCAC40"
+license: Apache-2.0
+keywords:
+  - large language models
+  - temporal robustness
+  - CSRD
+  - ESRS
+  - preference optimization
+  - ORPO
+  - regulatory text
+preferred-citation:
+  type: generic
+  title: "Regulatory Semantic Drift: When Preference-based Correction Fails Silently, FINCAC40, a Sixteen-year AMF Corpus (2010-2026) for Evaluating the Temporal Robustness of LLMs in ESG Classification"
+  authors:
+    - family-names: Dieng
+      given-names: Cheikh Ibra
+  year: 2026
+  month: 8
+  url: "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7438503"
+  notes: "Preprint, SSRN"

@@ -1,9 +1,9 @@
 """
 benchmark_temporal_drift.py — Évaluation Multi-LLM du Biais de Récence Temporelle
 ═══════════════════════════════════════════════════════════════════════════════════════
-Contribution centrale du papier :
-    "Temporal Regulatory Semantic Drift: How LLMs Fail on 16 Years
-     of French Financial Disclosures — and How to Fix It"
+Section 4.1 du papier :
+    "Regulatory Semantic Drift: When Preference-based Correction Fails Silently"
+    (Dieng, 2026 — https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7438503)
 
 HYPOTHÈSE TESTÉE (H1) :
     Les LLM sous-classifient systématiquement les documents réglementaires
@@ -13,26 +13,20 @@ HYPOTHÈSE TESTÉE (H1) :
     sur les 4 époques (2010-2014 → 2015-2019 → 2020-2022 → 2023-2026).
 
 PROTOCOLE :
-    - 137 paragraphes (Gold 140 moins 3 réservés au pool few-shot)
+    - Gold 140 en zero-shot ; 137 en 3-shot (les 3 exemples few-shot sont retirés)
     - 4 modèles : Mistral-7B / Mistral-Large / GPT-4o / Claude-4.6-Sonnet
     - 2 modes : zero-shot (--n-shot 0) et 3-shot (--n-shot 3)
     - température = 0 / random_seed = 42 partout
     - Checkpoint par modèle → résume après crash
 
-MÉTRIQUES (par modèle, par mode, par époque) :
-    - F1 binaire (CSRD vs none) → métrique principale de dérive temporelle
-    - Kappa de Cohen binaire + bootstrap CI 95%
-    - ECE (Expected Calibration Error, confiance auto-rapportée)
-    - Accuracy multi-classe
-    - Macro-F1 multi-classe (catégories avec n ≥ 5)
-    - TD (Temporal Drift) = F1(2023-2026) − F1(2010-2014) par modèle
-    - β_drift (pente de régression linéaire F1 ~ epoch_index) par modèle
+MÉTRIQUES : calculées ensuite par compute_metrics.py (F1 binaire, κ avec IC
+    bootstrap, FNR/FPR par époque, McNemar) à partir du CSV de prédictions.
 
 SORTIES :
-    results/raw_predictions_{mode}_{RUN_TS}.csv    ← toutes les prédictions
-    results/metrics_{mode}_{RUN_TS}.json           ← métriques complètes
-    results/latex_tables_{mode}_{RUN_TS}.tex        ← tables LaTeX copier-coller
-    results/checkpoint_{model_id}.json             ← reprise après crash
+    data/results/predictions_shot{n}_{RUN_TS}.csv      ← toutes les prédictions
+    data/results/checkpoint_{model_key}_shot{n}.json   ← reprise après crash
+    Les métriques et les tables LaTeX sont calculées ensuite par
+    src/evaluation/compute_metrics.py --csv <fichier de prédictions>.
 
 MODÈLES ET JUSTIFICATION SCIENTIFIQUE :
     Groupe 1 — Contrôle intra-famille (scaling law) :
@@ -49,11 +43,11 @@ Dépendances :
 
 
 Usage :
-    python benchmark_temporal_drift.py --n-shot 0           # zero-shot (recommandé en premier)
-    python benchmark_temporal_drift.py --n-shot 3           # 3-shot
-    python benchmark_temporal_drift.py --n-shot 0 --resume  # reprendre après crash
-    python benchmark_temporal_drift.py --n-shot 0 --limit 10 --model mistral-7b  # test rapide
-    python benchmark_temporal_drift.py --report-only        # régénère tables depuis CSV existant
+    python src/evaluation/benchmark_temporal_drift.py --n-shot 0           # zero-shot (recommandé en premier)
+    python src/evaluation/benchmark_temporal_drift.py --n-shot 3           # 3-shot
+    python src/evaluation/benchmark_temporal_drift.py --n-shot 0 --resume  # reprendre après crash
+    python src/evaluation/benchmark_temporal_drift.py --n-shot 0 --limit 10 --model mistral-7b  # test rapide
+    python src/evaluation/compute_metrics.py --csv data/results/predictions_shot0_<TS>.csv  # métriques
 """
 
 from __future__ import annotations
@@ -64,17 +58,10 @@ import logging
 import os
 import sys
 import time
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-from scipy.stats import linregress
-from sklearn.metrics import (
-    accuracy_score, cohen_kappa_score,
-    f1_score, precision_score, recall_score,
-)
 
 
 import warnings
@@ -91,9 +78,6 @@ def _require_env(name: str) -> str:
     return value
 
 
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -160,13 +144,11 @@ MODELS = {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
-# EXEMPLES FEW-SHOT (tirés du Gold, exclus du test set)
-# Ces 3 exemples couvrent les 3 catégories dominantes (none, E1, ESRS2)
-# sur 3 époques différentes → maximisent la couverture contextuelle.
-# Leurs paragraph_id sont documentés pour reproductibilité.
+# EXEMPLES FEW-SHOT (tirés du Gold, exclus du test set en 3-shot)
+# build_system_prompt(3) utilise les 3 PREMIERS : Gold #101 (none, 2023-2026),
+# #23 (E1, 2015-2019) et #57 (E2, 2023-2026). Les 4 suivants ne servent qu'avec
+# n_shot > 3. Le numéro # est celui de la colonne « # » du classeur Gold.
 # ═════════════════════════════════════════════════════════════════════════════
-
-FEW_SHOT_IDS = set()   # rempli lors du chargement
 
 FEW_SHOT_EXAMPLES = [
     # #101 | 2023-2026 | STMICROELECTRONICS NV | none
@@ -528,7 +510,7 @@ def load_gold(filepath: str, n_shot: int, limit: int | None) -> pd.DataFrame:
         logger.info(f"  Mode test limité à {limit} exemples")
 
     logger.info(f"  Test set final : {len(df)} exemples")
-    logger.info(f"  Distribution époque :")
+    logger.info("  Distribution époque :")
     for ep, n in df["epoch"].value_counts().sort_index().items():
         logger.info(f"    {ep}: {n}")
 
@@ -823,7 +805,7 @@ def save_predictions(all_rows: list[dict], n_shot: int) -> Path:
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="FraFin — Benchmark Temporal Drift Multi-LLM (version simplifiée)"
+        description="FinCAC40 — Benchmark Temporal Drift Multi-LLM (version simplifiée)"
     )
     p.add_argument("--gold", default=GOLD_FILE,
                    help="Fichier Excel annoté (défaut : gold_150_annotated_clean_reformulated_without.xlsx)")
@@ -843,7 +825,7 @@ def main():
     args = parse_args()
 
     logger.info("═" * 65)
-    logger.info("  FraFin — Benchmark Temporal Drift Multi-LLM (simplifié)")
+    logger.info("  FinCAC40 — Benchmark Temporal Drift Multi-LLM (simplifié)")
     logger.info(f"  Mode    : {args.n_shot}-shot | Seed : {RANDOM_SEED} | T = {TEMPERATURE}")
     logger.info(f"  Modèles : {args.model or 'tous'}")
     logger.info("═" * 65)
@@ -865,7 +847,7 @@ def main():
     logger.info(f"\n{'═'*65}")
     logger.info(f"  RÉSUMÉ — {len(all_rows)} prédictions totales")
     logger.info(f"{'═'*65}")
-    logger.info(f"\n  Prédictions par catégorie :")
+    logger.info("\n  Prédictions par catégorie :")
     for cat, n in df_summary["pred_category"].value_counts().items():
         logger.info(f"    {cat:<22} {n:>4}")
     logger.info(f"\n  Erreurs : {df_summary['error'].notna().sum()}")

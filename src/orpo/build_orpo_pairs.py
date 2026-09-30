@@ -1,7 +1,7 @@
 """
 build_orpo_pairs.py — Construction de Paires ORPO par Rejection Sampling
 ═══════════════════════════════════════════════════════════════════════════════════════
-Phase 6a du pipeline FraFin-Reasoning — Remédiation du biais de récence temporelle.
+Phase 6a du pipeline FinCAC40 — Remédiation du biais de récence temporelle.
 
 RÔLE DANS LE PIPELINE :
     frafin_sample_rigorous_14.8k.parquet   (pool nettoyé, Phase 2 — PAS le Gold)
@@ -25,8 +25,8 @@ PRINCIPE MÉTHODOLOGIQUE — REJECTION SAMPLING, PAS FABRICATION :
     À la place, pour chaque paragraphe candidat :
       1. Un JUGE (Mistral Large, temp=0) produit un label de référence ("silver").
       2. La POLITIQUE DE BASE (Mistral-7B, le modèle qu'on va corriger) produit
-         sa propre prédiction zero-shot sur le MÊME paragraphe, avec le MÊME
-         prompt que celui utilisé dans benchmark_temporal_drift.py.
+         sa propre prédiction en 3-shot sur le MÊME paragraphe, avec le MÊME
+         prompt que celui utilisé dans benchmark_temporal_drift.py --n-shot 3.
       3. Si la prédiction du modèle diverge du label de référence (silver),
          c'est une ERREUR RÉELLE ET OBSERVÉE du modèle — pas une fabrication.
          Elle devient `rejected`. Le label silver devient `chosen`.
@@ -39,7 +39,7 @@ DEUX TYPES DE PAIRES CONSTRUITES :
     Type A — Correction du biais de récence (FN, le cas dominant, cf. Section 4)
         silver = CSRD réel   |   base prédit `none`  →  chosen=silver, rejected=base
         Échantillonné en priorité sur 2010-2014 et 2015-2019 (strates à FNR élevé
-        documenté empiriquement : FNR=0.667 sur 2010-2014, cf. Tableau 4.3).
+        documenté empiriquement : FNR=0.667 sur 2010-2014, cf. tableau 3 du papier).
 
     Type B — Garde-fou anti-sur-correction (FP)
         silver = `none` réel   |   base prédit CSRD (faux positif)  →  chosen=silver, rejected=base
@@ -66,11 +66,11 @@ Dépendances :
 
 
 Usage :
-    python build_orpo_pairs.py
-    python build_orpo_pairs.py --target-pairs 1000
-    python build_orpo_pairs.py --resume
-    python build_orpo_pairs.py --limit 20                # test rapide
-    python build_orpo_pairs.py --dry-run                 # inspecte le plan d'échantillonnage
+    python src/orpo/build_orpo_pairs.py
+    python src/orpo/build_orpo_pairs.py --target-pairs 1000
+    python src/orpo/build_orpo_pairs.py --resume
+    python src/orpo/build_orpo_pairs.py --limit 20                # test rapide
+    python src/orpo/build_orpo_pairs.py --dry-run                 # inspecte le plan d'échantillonnage
 """
 
 from __future__ import annotations
@@ -93,8 +93,14 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from src.evaluation.shared_prompts import build_system_prompt, few_shot_signatures, VALID_CATEGORIES, TAXONOMY_BLOCK  # noqa: E402
-# ↑ CORRECTIF : ces blocs étaient auparavant dupliqués manuellement dans ce fichier et
+# Rend le paquet `src` importable quand le script est lancé par son chemin
+# depuis la racine du dépôt : python src/<module>/<script>.py
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from src.evaluation.shared_prompts import build_system_prompt, VALID_CATEGORIES, TAXONOMY_BLOCK  # noqa: E402
+# ↑ ces blocs étaient auparavant dupliqués manuellement dans ce fichier et
 # avaient dérivé du texte utilisé dans benchmark_temporal_drift.py (TAXONOMY_BLOCK
 # condensé au lieu du texte détaillé, et surtout aucune injection de few-shot alors que
 # le FNR=0.667 de Section 4 a été mesuré en 3-shot). Cf. shared_prompts.py pour le détail.
@@ -110,12 +116,7 @@ OUT_DIR     = DATA_DIR / "orpo"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 RUN_TS      = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "").strip()
-if not MISTRAL_API_KEY:
-    raise RuntimeError(
-        "MISTRAL_API_KEY requise. Copiez .env.example vers .env et renseignez votre clé."
-    )
-
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")   # vérifiée dans main(), hors --help / --dry-run
 API_URL         = "https://api.mistral.ai/v1/chat/completions"
 
 SILVER_MODEL = "mistral-large-latest"   # juge — modèle fort, référence de vérité
@@ -123,9 +124,9 @@ BASE_MODEL   = "open-mistral-7b"        # politique à corriger — celui de l'�
 
 TEMPERATURE  = 0.0
 RANDOM_SEED  = 42
-MAX_TOKENS   = 256      # CORRECTIF : aligné sur benchmark_temporal_drift.py (était 300)
+MAX_TOKENS   = 256      # aligné sur benchmark_temporal_drift.py (était 300)
 
-N_SHOT_POLICY = 3        # CORRECTIF : la politique de base doit être interrogée dans les
+N_SHOT_POLICY = 3        # la politique de base doit être interrogée dans les
                           # MÊMES conditions que la mesure de Section 4 (3-shot), pas en 0-shot.
 
 TARGET_PAIRS_DEFAULT = 1000     # budget total de paires à construire
@@ -163,7 +164,7 @@ logger = logging.getLogger(__name__)
 # ═════════════════════════════════════════════════════════════════════════════
 # POLITIQUE DE BASE : CORRECTIF — construit via shared_prompts.build_system_prompt(3),
 # identique BYTE POUR BYTE au system prompt de benchmark_temporal_drift.py en 3-shot
-# (celui qui a produit FNR=0.667 sur 2010-2014, Tableau 4.3). Auparavant ce script
+# (celui qui a produit FNR=0.667 sur 2010-2014, tableau 3). Auparavant ce script
 # redéfinissait sa propre version condensée et 0-shot de ce prompt — la dérive entre
 # les deux versions expliquait très probablement l'inversion Type A/Type B observée
 # (280 FP vs 24 FN) : ce n'était pas que H1 était fausse, c'est que Phase 6a mesurait
@@ -294,7 +295,7 @@ def load_pool_excluding_gold(pool_path: str, gold_path: str) -> pd.DataFrame:
         logger.warning("  ⚠ Fichier Gold introuvable — AUCUNE exclusion appliquée. "
                         "RISQUE DE FUITE DE DONNÉES si le Gold provient de ce pool.")
 
-    logger.info(f"  Distribution par époque (pool final) :")
+    logger.info("  Distribution par époque (pool final) :")
     for ep, n in df["epoch"].value_counts().reindex(EPOCH_ORDER).items():
         logger.info(f"    {ep}: {n if pd.notna(n) else 0}")
 
@@ -312,7 +313,6 @@ def sample_candidates(df: pd.DataFrame, n_candidates: int, seed: int) -> pd.Data
     du taux d'erreur du modèle, mesuré empiriquement en Section 4 (~15-45%
     de FN selon l'époque, quasi nul sur les époques récentes pour le FP).
     """
-    rng = np.random.RandomState(seed)
     parts = []
     for ep, weight in EPOCH_SAMPLING_WEIGHT.items():
         pool_ep = df[df["epoch"] == ep]
@@ -422,11 +422,11 @@ def process_candidate(
     try:
         with call_lock:
             call_counter["n"] += 2   # juge + politique
-        silver_cat, silver_sub, silver_cot, silver_json = call_mistral(
+        silver_cat, _, _, silver_json = call_mistral(
             session, SILVER_MODEL, SYSTEM_PROMPT_JUDGE, text
         )
         time.sleep(REQUEST_DELAY)
-        base_cat, base_sub, base_cot, base_json = call_mistral(
+        base_cat, _, _, base_json = call_mistral(
             session, BASE_MODEL, SYSTEM_PROMPT_POLICY, text
         )
         time.sleep(REQUEST_DELAY)
@@ -543,31 +543,46 @@ def build_pairs(
 # ÉQUILIBRAGE FINAL — cap le déséquilibre Type A / Type B / Type C
 # ═════════════════════════════════════════════════════════════════════════════
 
-def balance_pairs(pairs: list[dict], max_type_ratio: float = 3.0, min_cap_floor: int = 100) -> list[dict]:
+def balance_pairs(
+    pairs: list[dict],
+    max_type_ratio: float = 3.0,
+    min_cap_floor: int = 100,
+    max_ratio_to_guardrail: float = 5.0,
+) -> list[dict]:
     """
-    Évite qu'un type de paire domine excessivement l'entraînement — SANS détruire
-    le signal principal quand les types de garde-fou sont naturellement très rares.
+    Equilibre le dataset ORPO sur DEUX contraintes independantes, pas une seule :
 
-    CORRECTIF (cf. INCIDENT_NOTE.md, suite du run post-fix prompt) : la version
-    précédente calculait `cap = min_count * max_type_ratio` en utilisant directement
-    le compte du type le plus rare. Sur le run post-correction (A=318, B=8, C=5),
-    ça donnait cap=15 et jetait 303 exemples A_recency_fn valides — exactement le
-    phénomène central de la recherche (H1) — pour un gain de garde-fou nul (B et C
-    étaient déjà sous le cap, donc intégralement conservés dans les deux cas).
+    (1) Plancher anti-destruction (fix precedent, cf. docs/INCIDENT_NOTE.md) :
+        cap_basis = max(min_count, min_cap_floor) -- evite qu'une session ou
+        B/C sont accidentellement tres rares n'ecrase le signal A utile.
 
-    Nouvelle règle : le plancher du cap est `max(min_count, min_cap_floor)`, pas
-    `min_count` seul. Ça évite qu'une session où B/C sont accidentellement très
-    rares n'écrase le signal A. Les types de garde-fou (B, C) restent TOUJOURS
-    conservés intégralement (ils ne sont jamais eux-mêmes cappés ici, seul un type
-    en excès peut l'être) — donc ce changement n'affaiblit en rien leur rôle de
-    garde-fou, il arrête juste de faire des dégâts collatéraux sur A.
+    (2) Plafond A vs garde-fou combine (B+C) :
+        Le fix (1) seul a permis un run reel ou A=318, B=8, C=5 (97.2% de A) --
+        ORPO a appris le raccourci degenere "toujours predire CSRD" en moins
+        d'une epoque (rewards/accuracies=1.0 des le step 15/51), car ce
+        raccourci satisfait trivialement 97% des paires d'entrainement.
+        Le FNR=0.0 obtenu en evaluation etait un artefact de ce collapse
+        (confirme par accuracy=0.164 tres faible sur le meme run), PAS une
+        correction du biais de recence temporelle.
+
+        On impose donc en plus : n_A_final <= max_ratio_to_guardrail * (n_B + n_C).
+        Avec B=8, C=5 (n_guardrail=13) et max_ratio_to_guardrail=5.0, A est
+        plafonne a 65 -- un volume qui reste utile pour le signal H1 tout en
+        laissant B+C peser au moins 1/6e du dataset d'entrainement, densite
+        suffisante pour qu'ORPO ne puisse plus ignorer le contre-exemple
+        "ne predis pas CSRD par defaut" pendant l'entrainement.
+
+        Si n_B + n_C = 0 (aucun garde-fou disponible du tout), cette contrainte
+        est desactivee avec un avertissement explicite -- le risque de collapse
+        reste alors entier et doit etre traite en amont (cf. recommandation de
+        minage actif de paires B, docstring du module).
     """
     by_type = defaultdict(list)
     for p in pairs:
         by_type[p["pair_type"]].append(p)
 
     counts = {t: len(v) for t, v in by_type.items()}
-    logger.info(f"\n  Distribution avant équilibrage : {counts}")
+    logger.info(f"\n  Distribution avant equilibrage : {counts}")
 
     non_empty = [c for c in counts.values() if c > 0]
     if not non_empty:
@@ -577,15 +592,46 @@ def balance_pairs(pairs: list[dict], max_type_ratio: float = 3.0, min_cap_floor:
     cap_basis = max(min_count, min_cap_floor)
     cap = max(1, int(cap_basis * max_type_ratio))
 
+    # --- Plafond combine sur le type dominant A_recency_fn ---
+    n_guardrail = sum(n for t, n in counts.items() if t != "A_recency_fn")
+    if n_guardrail == 0:
+        logger.warning(
+            "  ⚠ Aucune paire de garde-fou (B/C) disponible -- le plafond "
+            "A-vs-garde-fou est desactive. Risque de collapse degenere "
+            "('toujours predire CSRD') NON couvert par cet equilibrage. "
+            "Relancez la collecte pour obtenir au moins quelques paires B/C "
+            "avant d'entrainer."
+        )
+        guardrail_cap = cap
+    else:
+        guardrail_cap = max(1, int(max_ratio_to_guardrail * n_guardrail))
+        if "A_recency_fn" in counts:
+            logger.info(
+                f"  Plafond combine A vs garde-fou (B+C={n_guardrail}, "
+                f"ratio max {max_ratio_to_guardrail}x) : A <= {guardrail_cap}"
+            )
+
     rng = random.Random(RANDOM_SEED)
     balanced = []
     for t, plist in by_type.items():
-        if len(plist) > cap:
-            balanced.extend(rng.sample(plist, cap))
-            logger.info(f"    {t}: {len(plist)} → {cap} (cappé, plancher={min_cap_floor}, ratio max {max_type_ratio}x)")
+        effective_cap = min(cap, guardrail_cap) if t == "A_recency_fn" else cap
+        if len(plist) > effective_cap:
+            balanced.extend(rng.sample(plist, effective_cap))
+            logger.info(
+                f"    {t}: {len(plist)} → {effective_cap} (cappé"
+                f"{', plafond garde-fou appliqué' if t == 'A_recency_fn' and effective_cap == guardrail_cap else ''})"
+            )
         else:
             balanced.extend(plist)
             logger.info(f"    {t}: {len(plist)} (conservé intégralement)")
+
+    final_counts = Counter(p["pair_type"] for p in balanced)
+    logger.info(f"\n  Distribution finale : {dict(final_counts)}")
+    n_a_final = final_counts.get("A_recency_fn", 0)
+    n_guard_final = sum(n for t, n in final_counts.items() if t != "A_recency_fn")
+    if n_guard_final > 0:
+        logger.info(f"  Ratio A / garde-fou final : {n_a_final / n_guard_final:.1f}x "
+                    f"(cible <= {max_ratio_to_guardrail}x)")
 
     rng.shuffle(balanced)
     return balanced
@@ -656,26 +702,26 @@ def save_stats(
 
 def log_summary(pairs: list[dict], status_counts: Counter) -> None:
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  RÉSUMÉ — Construction des Paires ORPO")
+    logger.info("  RÉSUMÉ — Construction des Paires ORPO")
     logger.info(f"{'═'*65}")
     logger.info(f"  Candidats en accord (skip)     : {status_counts.get('agreement', 0)}")
     logger.info(f"  Candidats en erreur API        : {status_counts.get('api_error', 0)}")
     logger.info(f"  Paires construites (total)     : {len(pairs)}")
 
     by_type = Counter(p["pair_type"] for p in pairs)
-    logger.info(f"\n  Par type :")
+    logger.info("\n  Par type :")
     for t, n in by_type.items():
         logger.info(f"    {t:<25} {n:>5}")
 
     by_epoch = Counter(p["epoch"] for p in pairs)
-    logger.info(f"\n  Par époque :")
+    logger.info("\n  Par époque :")
     for ep in EPOCH_ORDER:
         logger.info(f"    {ep:<12} {by_epoch.get(ep, 0):>5}")
 
-    logger.info(f"\n  Fichiers produits :")
+    logger.info("\n  Fichiers produits :")
     logger.info(f"    {PAIRS_FILE}")
     logger.info(f"    {STATS_FILE}")
-    logger.info(f"\n  ⚙  Prochaine étape : train_orpo_mistral7b.py")
+    logger.info("\n  ⚙  Prochaine étape : train_orpo_mistral7b.py")
     logger.info(f"{'═'*65}")
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -693,7 +739,7 @@ def dry_run(pool_file: str, gold_file: str, target_pairs: int, seed: int) -> Non
     n_candidates_needed = int(target_pairs / np.mean(list(est_yield.values())))
     candidates = sample_candidates(df, n_candidates_needed, seed)
 
-    logger.info(f"\n  [DRY-RUN] Estimation de rendement (basée sur FNR/FPR Section 4) :")
+    logger.info("\n  [DRY-RUN] Estimation de rendement (basée sur FNR/FPR Section 4) :")
     total_est = 0
     for ep in EPOCH_ORDER:
         n_ep = (candidates["epoch"] == ep).sum()
@@ -702,7 +748,7 @@ def dry_run(pool_file: str, gold_file: str, target_pairs: int, seed: int) -> Non
         logger.info(f"    {ep:<12} candidats={n_ep:>5}  paires_estimées≈{est:>5}")
     logger.info(f"\n  Total paires estimées ≈ {total_est}  (cible : {target_pairs})")
     logger.info(f"  Appels API estimés ≈ {len(candidates) * 2}  (juge + politique)")
-    logger.info(f"\n  [DRY-RUN] Aucun appel API effectué. Relancez sans --dry-run pour exécuter.")
+    logger.info("\n  [DRY-RUN] Aucun appel API effectué. Relancez sans --dry-run pour exécuter.")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CLI & MAIN
@@ -710,7 +756,7 @@ def dry_run(pool_file: str, gold_file: str, target_pairs: int, seed: int) -> Non
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="FraFin-Reasoning — Construction de paires ORPO par rejection sampling"
+        description="FinCAC40 — Construction de paires ORPO par rejection sampling"
     )
     p.add_argument("--pool",   default=POOL_FILE)
     p.add_argument("--gold",   default=GOLD_FILE)
@@ -721,7 +767,12 @@ def parse_args():
     p.add_argument("--min-cap-floor", type=int, default=100,
                    help="Plancher minimum utilisé comme base du cap (évite qu'un type de "
                         "garde-fou accidentellement très rare n'écrase le signal principal). "
-                        "Cf. INCIDENT_NOTE.md.")
+                        "Cf. docs/INCIDENT_NOTE.md.")
+    p.add_argument("--max-ratio-to-guardrail", type=float, default=5.0,
+                   help="Plafonne A_recency_fn à ce ratio maximum du volume "
+                        "combiné B+C, indépendamment du plafond ci-dessus. Empêche ORPO "
+                        "d'apprendre le raccourci dégénéré 'toujours prédire CSRD' quand B/C "
+                        "sont naturellement rares. Cf. docs/INCIDENT_NOTE.md, Run 1.")
     p.add_argument("--seed",   type=int, default=RANDOM_SEED)
     p.add_argument("--resume", action="store_true")
     p.add_argument("--limit",  type=int, default=None,
@@ -737,7 +788,7 @@ def main():
     RANDOM_SEED = args.seed
 
     logger.info("═" * 65)
-    logger.info("  FraFin-Reasoning — Construction Paires ORPO (Phase 6a)")
+    logger.info("  FinCAC40 — Construction Paires ORPO (Phase 6a)")
     logger.info(f"  Juge (silver)   : {SILVER_MODEL}")
     logger.info(f"  Politique (base): {BASE_MODEL}")
     logger.info(f"  Cible           : {args.target_pairs} paires")
@@ -747,6 +798,14 @@ def main():
     if args.dry_run:
         dry_run(args.pool, args.gold, args.target_pairs, args.seed)
         return
+
+    if not MISTRAL_API_KEY:
+        logger.error(
+            "Variable d'environnement MISTRAL_API_KEY absente. "
+            "Définis-la (export MISTRAL_API_KEY=... / $env:MISTRAL_API_KEY='...') avant de lancer ce script. "
+            "NE JAMAIS coder une clé API en clair dans le code source."
+        )
+        sys.exit(1)
 
     df = load_pool_excluding_gold(args.pool, args.gold)
 
@@ -766,7 +825,7 @@ def main():
         logger.error("Aucune paire construite — vérifiez la connectivité API et le pool source.")
         sys.exit(1)
 
-    pairs = balance_pairs(pairs, args.max_type_ratio, args.min_cap_floor)
+    pairs = balance_pairs(pairs, args.max_type_ratio, args.min_cap_floor, args.max_ratio_to_guardrail)
 
     save_pairs_jsonl(pairs, PAIRS_FILE)
     save_stats(pairs, status_counts, by_epoch_type, STATS_FILE)

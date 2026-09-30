@@ -13,11 +13,11 @@ Prérequis :
 
 Usage :
     # 1. Vérifier ce qui sera publié
-    python publish_model_to_hf.py --adapter outputs/mistral7b-orpo-csrd/final_adapter \\
+    python src/publishing/publish_model_to_hf.py --adapter outputs/mistral7b-orpo-csrd/final_adapter \\
                                    --repo CID99/Mistral-7B-ORPO-CSRD
 
     # 2. Publier en privé d'abord
-    python publish_model_to_hf.py --adapter ... --repo ... --push --private
+    python src/publishing/publish_model_to_hf.py --adapter ... --repo ... --push --private
 """
 
 from __future__ import annotations
@@ -133,11 +133,11 @@ def sanity_check_adapter(out: Path) -> bool:
     print(f"  LoRA r={r}, alpha={alpha}")
 
     if "Mistral-7B-Instruct-v0.3" not in str(base):
-        print(f"  ⚠  Le modèle de base ne correspond pas à celui annoncé dans la carte "
-              f"(Mistral-7B-Instruct-v0.3). Corrigez la carte ou vérifiez l'adaptateur.")
+        print("  ⚠  Le modèle de base ne correspond pas à celui annoncé dans la carte "
+              "(Mistral-7B-Instruct-v0.3). Corrigez la carte ou vérifiez l'adaptateur.")
         return False
     if r != 16 or alpha != 32:
-        print(f"  ⚠  r/alpha diffèrent des valeurs annoncées dans la carte (r=16, alpha=32).")
+        print("  ⚠  r/alpha diffèrent des valeurs annoncées dans la carte (r=16, alpha=32).")
     return True
 
 
@@ -145,7 +145,7 @@ def main():
     p = argparse.ArgumentParser(description="Publie l'adaptateur ORPO sur le Hub")
     p.add_argument("--adapter", required=True, help="Dossier de l'adaptateur LoRA final")
     p.add_argument("--repo", required=True, help="CID99/Mistral-7B-ORPO-CSRD")
-    p.add_argument("--card", default="MODEL_CARD.md", help="Carte de modèle à publier")
+    p.add_argument("--card", default="cards/model_card.md", help="Carte de modèle à publier")
     p.add_argument("--pairs", default=None, help="orpo_pairs_*.jsonl")
     p.add_argument("--training-log", default=None, help="training_log_*.json")
     p.add_argument("--eval-report", default=None, help="eval_report_orpo.json")
@@ -185,17 +185,17 @@ def main():
                   f"votre identifiant avant publication, sinon les liens seront morts.")
     else:
         print(f"\n  ❌ Carte de modèle introuvable : {card}")
-        print(f"     Publier un modèle sans carte le rend inutilisable et peu sérieux.")
+        print("     Publier un modèle sans carte le rend inutilisable et peu sérieux.")
         ok = False
 
     # --- Artefacts manquants : avertir sans bloquer ---
     missing_research = [k for k, v in extras.items() if v is None]
     if missing_research:
         print(f"\n  ⚠  Artefacts de recherche non fournis : {', '.join(missing_research)}")
-        print(f"     Ils sont annoncés dans la carte de modèle. Sans eux, l'échec publié")
-        print(f"     n'est pas reproductible — c'est pourtant tout l'intérêt de cette")
-        print(f"     publication. Fournissez-les via --pairs / --training-log /")
-        print(f"     --eval-report / --eval-predictions, ou retirez-les de la carte.")
+        print("     Ils sont annoncés dans la carte de modèle. Sans eux, l'échec publié")
+        print("     n'est pas reproductible — c'est pourtant tout l'intérêt de cette")
+        print("     publication. Fournissez-les via --pairs / --training-log /")
+        print("     --eval-report / --eval-predictions, ou retirez-les de la carte.")
 
     print(f"\n{'═'*64}\n  Contenu du dépôt ({len(manifest)} fichiers)\n{'═'*64}")
     total = 0

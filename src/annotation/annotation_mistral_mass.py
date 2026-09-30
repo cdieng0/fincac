@@ -1,7 +1,7 @@
 """
 annotation_mistral_mass.py — Annotation de Masse via Mistral Large API
 ═══════════════════════════════════════════════════════════════════════════════════════
-Phase 3b du pipeline FraFin-Reasoning.
+Phase 3b du pipeline FinCAC40.
 
 RÔLE DANS LE PIPELINE :
     frafin_sample_rigorous_{TS}.parquet  (15 000, Phase 2)
@@ -59,12 +59,12 @@ Variable d'environnement :
     export MISTRAL_API_KEY="votre_clé"
 
 Usage :
-    python annotation_mistral_mass.py
-    python annotation_mistral_mass.py --mode mass
-    python annotation_mistral_mass.py --mode iaa
-    python annotation_mistral_mass.py --resume
-    python annotation_mistral_mass.py --retry-failed
-    python annotation_mistral_mass.py --limit 50          # test rapide
+    python src/annotation/annotation_mistral_mass.py
+    python src/annotation/annotation_mistral_mass.py --mode mass
+    python src/annotation/annotation_mistral_mass.py --mode iaa
+    python src/annotation/annotation_mistral_mass.py --resume
+    python src/annotation/annotation_mistral_mass.py --retry-failed
+    python src/annotation/annotation_mistral_mass.py --limit 50          # test rapide
 """
 
 from __future__ import annotations
@@ -92,6 +92,12 @@ try:
 except ImportError:
     PARQUET_SUPPORT = False
 
+# Rend le paquet `src` importable quand le script est lancé par son chemin
+# depuis la racine du dépôt : python src/<module>/<script>.py
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 try:
     from src.annotation.csrd_taxonomy import (
         CSRD_TAXONOMY_VERSION,
@@ -102,8 +108,8 @@ try:
     )
 except ImportError:
     print(
-        "❌ csrd_taxonomy.py introuvable.\n"
-        "   Placez csrd_taxonomy.py dans le même dossier que ce script."
+        "❌ Impossible d'importer src/annotation/csrd_taxonomy.py.\n"
+        "   Lancez ce script depuis la racine du dépôt (python src/annotation/<script>.py)."
     )
     sys.exit(1)
 
@@ -133,7 +139,7 @@ MAX_RETRIES_VALIDATION = 2     # re-prompts correctifs après échec de validati
 # CHEMINS
 # ═════════════════════════════════════════════════════════════════════════════
 
-ROOT_DIR = Path(__file__).parent
+ROOT_DIR = Path(__file__).resolve().parents[2]  # racine du dépôt
 DATA_DIR = ROOT_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 RUN_TS   = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -166,13 +172,6 @@ OUTPUT_COLUMNS = [
     "annotateur", "taxonomy_version", "prompt_version",
     "confiance_annotation", "annotation_validated",
     "api_model_resolved", "api_usage_prompt_tokens", "api_usage_completion_tokens",
-]
-
-ANNOTATION_FIELDS = [
-    "csrd_category", "esrs_subcategory", "materialite_score",
-    "materialite_financiere", "materialite_impact",
-    "market_surprise", "horizon_temporel",
-    "chain_of_thought", "confiance_annotation",
 ]
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -419,7 +418,7 @@ def format_few_shot_block(examples: list[dict]) -> str:
     for i, ex in enumerate(examples, start=1):
         lines.append(f"--- Exemple {i} ---")
         lines.append(f"Extrait : «{ex['content']}»")
-        lines.append(f"Réponse attendue :")
+        lines.append("Réponse attendue :")
         lines.append(json.dumps(ex["answer"], ensure_ascii=False, indent=2))
         lines.append("")
     return "\n".join(lines)
@@ -865,7 +864,7 @@ def save_global_report(
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="FraFin-Reasoning — Annotation Mistral Large (Phase 3b)"
+        description="FinCAC40 — Annotation Mistral Large (Phase 3b)"
     )
     p.add_argument("--pool",   default="auto", help="frafin_sample_rigorous_*.parquet")
     p.add_argument("--gold",   default="auto", help="frafin_gold_500_*.xlsx")
@@ -895,7 +894,7 @@ def main():
         sys.exit(1)
 
     logger.info("═" * 65)
-    logger.info("  FraFin-Reasoning — Annotation Mistral Large (Phase 3b)")
+    logger.info("  FinCAC40 — Annotation Mistral Large (Phase 3b)")
     logger.info(f"  Mode : {args.mode}  |  Modèle : {args.model}  |  Seed : {args.seed}")
     logger.info(f"  Workers : {MAX_WORKERS}  |  Batch : {BATCH_SIZE}")
     logger.info("═" * 65)
@@ -941,7 +940,7 @@ def main():
     )
 
     logger.info(f"\n{'═'*65}")
-    logger.info(f"  TERMINÉ")
+    logger.info("  TERMINÉ")
     if mass_stats:
         logger.info(f"  Mass : {mass_stats['n_success']:,} OK / "
                     f"{mass_stats['n_submitted']:,}  "
@@ -950,7 +949,7 @@ def main():
         logger.info(f"  IAA  : {iaa_stats['n_success']:,} OK / "
                     f"{iaa_stats['n_submitted']:,}  "
                     f"({iaa_stats['n_failed']:,} échecs)")
-    logger.info(f"  ⚙  Prochaine étape : validation_iaa.py")
+    logger.info("  ⚙  Prochaine étape : validation_iaa.py")
     logger.info("═" * 65)
 
 

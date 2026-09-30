@@ -1,0 +1,43 @@
+# ── Environnements Python ──────────────────────────────────────────────────
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ── Secrets : ne jamais versionner ─────────────────────────────────────────
+.env
+*.key
+
+# ── Données ────────────────────────────────────────────────────────────────
+# Le corpus (313 608 paragraphes) et le Gold Standard sont publiés sur
+# Hugging Face : https://huggingface.co/datasets/CID99/FinCAC40
+# Seuls data/README.md et les petits artefacts de data/results/ sont suivis.
+data/*
+!data/README.md
+!data/results/
+flux-amf-new-prod.csv
+*.parquet
+
+# ── Sorties régénérées par les scripts ─────────────────────────────────────
+# Adaptateurs et checkpoints : https://huggingface.co/CID99/Mistral-7B-ORPO-CSRD
+outputs/
+hf_build/
+hf_model_build/
+*.safetensors
+*.bin
+*.pt
+wandb/
+
+# ── Éditeurs et systèmes ───────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Journaux d’exécution ───────────────────────────────────────────────────
+*.log
+data/results/checkpoint_*
