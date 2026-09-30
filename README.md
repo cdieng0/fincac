@@ -17,7 +17,7 @@ optimization.
 
 | Resource | Where |
 |---|---|
-| Preprint | [SSRN 7438503](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7438503) · PDF copy in [`paper/`](paper/) |
+| Preprint | [SSRN 7438503](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7438503) |
 | Corpus and Gold Standard | [huggingface.co/datasets/CID99/FinCAC40](https://huggingface.co/datasets/CID99/FinCAC40) |
 | ORPO adapter and its training artefacts | [huggingface.co/CID99/Mistral-7B-ORPO-CSRD](https://huggingface.co/CID99/Mistral-7B-ORPO-CSRD) |
 | Interactive demo | [huggingface.co/spaces/CID99/FinCAC40-collapse-demo](https://huggingface.co/spaces/CID99/FinCAC40-collapse-demo) |
